@@ -11,7 +11,7 @@ from app.core.auth import require_ingest_key
 from app.core.config import get_settings
 from app.db.database import get_db
 from app.db.models.security_event import SecurityEvent
-from app.schemas.event import (
+from app.schemas.events import (
     EventBatchCreate,
     EventBatchItemResult,
     EventBatchResponse,
