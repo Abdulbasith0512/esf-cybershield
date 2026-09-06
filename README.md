@@ -55,6 +55,33 @@ docker compose config   # validates compose file
 docker compose up -d    # starts foundation infra (PostgreSQL)
 ```
 
+## Frontend (SOC dashboard foundation)
+
+| | |
+|---|---|
+| Stack | Next.js 16, React 19, TypeScript, Tailwind CSS 4, Vitest |
+| Setup | `cd frontend; npm install` |
+| Env | copy `.env.example` to `.env.local`, set `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`) |
+| Dev | `npm run dev` (http://localhost:3000) |
+| Build | `npm run build` + `npm start` |
+| Tests | `npm test` |
+
+Architecture:
+
+```
+Next.js (frontend/)
+   ↓  REST over NEXT_PUBLIC_API_BASE_URL
+FastAPI (backend/)
+   ↓  SQLAlchemy + psycopg
+PostgreSQL
+```
+
+The frontend never connects directly to PostgreSQL. The Overview and
+Events sections are live against `GET /health` and `GET /api/v1/events`;
+Incidents, Detection Rules, MITRE ATT&CK, and UEBA render explicit
+"backend endpoint not available" placeholders until those APIs exist —
+no fabricated telemetry.
+
 ## Explicitly out of scope for Step 1
 
 Authentication, detection rules, ML models, RAG, Neo4j wiring, dashboards.
