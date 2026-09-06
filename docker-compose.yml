@@ -1,0 +1,40 @@
+# ESF CyberShield — Step 1 foundation.
+# Only PostgreSQL (official image) is active so `docker compose config`
+# and `docker compose up` succeed with no missing build contexts.
+# backend / frontend / ml / neo4j / chroma / ollama will be added incrementally.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: esf-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-esf}
+      POSTGRES_USER: ${POSTGRES_USER:-esf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-esf}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Planned (Step 2+ — do not uncomment until Dockerfiles exist):
+  # backend:    # build: ./backend, FastAPI on ${BACKEND_PORT:-8000}
+  # frontend:   # build: ./frontend, Vite on ${FRONTEND_PORT:-3000}
+  # ml:         # build: ./ml, batch/inference jobs
+  # neo4j:      # image: neo4j:5, attack graph
+  # chroma:     # image: chromadb/chroma, vector store
+  # ollama:     # image: ollama/ollama, local LLM
+
+volumes:
+  pgdata:
+
+networks:
+  default:
+    name: esf-net

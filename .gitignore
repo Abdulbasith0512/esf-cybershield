@@ -1,0 +1,54 @@
+# ---- Env ----
+.env
+!.env.example
+
+# ---- Python 3.11+ ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / Vite ----
+node_modules/
+dist/
+dist-ssr/
+.vite/
+
+# ---- Data artifacts (keep dirs via .gitkeep, ignore contents) ----
+data/raw/*
+data/processed/*
+data/synthetic/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/synthetic/.gitkeep
+*.csv
+*.parquet
+*.pkl
+*.h5
+*.onnx
+
+# ---- ML / Vector / Graph local state ----
+chroma_db/
+embeddings/
+mlruns/
+neo4j/data/
+neo4j/logs/
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- OS / IDE ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---- Keep empty scaffold dirs tracked ----
+!**/.gitkeep
