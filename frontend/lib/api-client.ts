@@ -6,6 +6,9 @@ import type {
   EventFilters,
   EventListResponse,
   HealthResponse,
+  IncidentDetail,
+  IncidentFilters,
+  IncidentListResponse,
   SecurityEvent,
 } from "@/lib/types";
 
@@ -76,4 +79,19 @@ export function listEvents(filters: EventFilters = {}, signal?: AbortSignal): Pr
 
 export function getEvent(eventId: string, signal?: AbortSignal): Promise<SecurityEvent> {
   return request<SecurityEvent>(`/api/v1/events/${encodeURIComponent(eventId)}`, { signal });
+}
+
+export function listIncidents(filters: IncidentFilters = {}, signal?: AbortSignal): Promise<IncidentListResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  const query = params.toString();
+  return request<IncidentListResponse>(`/api/v1/incidents${query ? `?${query}` : ""}`, { signal });
+}
+
+export function getIncident(incidentId: string, signal?: AbortSignal): Promise<IncidentDetail> {
+  return request<IncidentDetail>(`/api/v1/incidents/${encodeURIComponent(incidentId)}`, { signal });
 }
