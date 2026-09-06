@@ -1,5 +1,0 @@
-# Rule ID -> MITRE ATT&CK technique. Single source of truth for mapping.
-brute-force-5-fail-5min: T1110
-impossible-travel: T1078
-port-scan-10-dst-2min: T1046
-priv-escalation: T1068

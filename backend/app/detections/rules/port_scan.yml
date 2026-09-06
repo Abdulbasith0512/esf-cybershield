@@ -1,8 +1,0 @@
-rule_id: port-scan-10-dst-2min
-rule_name: Port scan sweep
-description: Same src_ip touching 10+ distinct dst_ip or ports within 2 minutes
-severity: medium
-mitre_technique: T1046
-params:
-  threshold: 10
-  window_minutes: 2

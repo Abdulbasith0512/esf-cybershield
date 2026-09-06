@@ -1,9 +1,0 @@
-rule_id: brute-force-5-fail-5min
-rule_name: Brute force logon burst
-description: 5+ failed logons for same user within 5 minutes
-severity: high
-mitre_technique: T1110
-params:
-  threshold: 5
-  window_minutes: 5
-  status: failure

@@ -1,8 +1,0 @@
-rule_id: impossible-travel
-rule_name: Impossible travel logon
-description: Same user successful logons from different src_ip within 60 minutes
-severity: high
-mitre_technique: T1078
-params:
-  window_minutes: 60
-  status: success
