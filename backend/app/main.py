@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health
+from app.api.routes import events, health, incidents, stats
 from app.core.config import get_settings
 
 
@@ -19,11 +19,14 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
 
     app.include_router(health.router)
+    app.include_router(events.router)
+    app.include_router(incidents.router)
+    app.include_router(stats.router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(

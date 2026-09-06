@@ -2,7 +2,6 @@
 
 from functools import lru_cache
 
-from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,9 +17,9 @@ class Settings(BaseSettings):
     app_name: str = "esf-cybershield-backend"
     app_env: str = "development"
     backend_port: int = 8000
-    database_url: PostgresDsn = (
-        "postgresql+psycopg://esf:changeme@localhost:5432/esf"  # type: ignore[assignment]
-    )
+    # str (not PostgresDsn) so local SQLite fallback works for dev/tests.
+    # Production uses PostgreSQL; SQLite is only for offline verification.
+    database_url: str = "postgresql+psycopg://esf:changeme@localhost:5432/esf"
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",

@@ -14,9 +14,13 @@ class Base(DeclarativeBase):
     pass
 
 
-def _build_engine():  # type: ignore[no-untyped-def]
-    settings = get_settings()
-    return create_engine(str(settings.database_url), pool_pre_ping=True)
+def _build_engine(url: str | None = None):  # type: ignore[no-untyped-def]
+    from app.core.config import get_settings
+
+    db_url = url or str(get_settings().database_url)
+    if db_url.startswith("sqlite"):
+        return create_engine(db_url, pool_pre_ping=True, connect_args={"check_same_thread": False})
+    return create_engine(db_url, pool_pre_ping=True)
 
 
 engine = _build_engine()

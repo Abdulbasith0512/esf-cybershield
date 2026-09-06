@@ -44,6 +44,11 @@ neo4j/logs/
 *.log
 logs/
 
+# ---- Local databases ----
+*.db
+*.sqlite
+*.sqlite3
+
 # ---- OS / IDE ----
 .DS_Store
 Thumbs.db

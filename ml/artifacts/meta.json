@@ -1,0 +1,11 @@
+{
+  "model_version": "iforest-v1",
+  "features": [
+    "hour",
+    "fail_count_1h",
+    "distinct_hosts_24h",
+    "target_count_1h"
+  ],
+  "n_train": 896,
+  "contamination": 0.12
+}
