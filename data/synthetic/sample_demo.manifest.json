@@ -1,0 +1,14 @@
+{
+  "generator": "esf-cybershield-synthetic-v1",
+  "seed": 7,
+  "total": 200,
+  "distribution": {
+    "normal": 177,
+    "brute_force": 5,
+    "credential_compromise": 8,
+    "suspicious_network": 3,
+    "unusual_login": 3,
+    "suspicious_process": 4
+  },
+  "note": "Review sample. Telemetry only, not evidence of real-world performance."
+}
