@@ -27,9 +27,12 @@ data/synthetic/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/synthetic/.gitkeep
+models/ueba/*
+!models/ueba/.gitkeep
 *.csv
 *.parquet
 *.pkl
+*.joblib
 *.h5
 *.onnx
 
