@@ -10,6 +10,11 @@ Determinism: ``--seed 42`` always yields the same logical dataset (event_ids
 are UUIDv5 over seed/scenario/sequence; timestamps derive from a fixed anchor
 plus seeded offsets — never wall-clock).
 
+Behavioral model: every identity owns one stable primary IP; normal traffic
+always uses it. Brute-force, unusual-login night logins, and the credential-
+compromise chain originate from controlled non-primary IPs so AUTH-003 fires
+on intentional behavior, never on background randomness.
+
 Usage:
     python scripts/generate_synthetic.py --events 10000 --seed 42 \\
         --output data/synthetic/events.jsonl --format jsonl
@@ -45,6 +50,10 @@ SOURCES = ["windows", "linux", "firewall", "dns", "endpoint"]
 
 # Reserved / documentation ranges only. Never real infrastructure.
 SUBNETS = ["10.10.0.0/24", "10.10.20.0/24", "192.168.50.0/24"]
+# Behavioral model: every identity owns ONE stable primary IP in 10.10.10.0/24.
+# Attacker / new-IP telemetry comes from 192.168.50.0/24, never colliding.
+PRIMARY_SUBNET = "10.10.10.0/24"
+ATTACKER_SUBNET = "192.168.50.0/24"
 EXTERNAL_IP = "203.0.113.200"  # TEST-NET-3 (RFC 5737)
 EXTERNAL_DOMAIN = "update-check.invalid"  # RFC 2606 .invalid
 DNS_RESOLVER = "10.10.0.53"
@@ -92,12 +101,39 @@ CSV_COLUMNS = [
 
 
 class Ctx:
-    """Shared seeded state: rng, seed, monotonic sequence for UUIDv5."""
+    """Shared seeded state: rng, seed, monotonic sequence for UUIDv5.
+
+    Behavioral identity model: each user/service account owns exactly one
+    stable primary IP (seeded shuffle of PRIMARY_SUBNET, so the mapping is
+    deterministic per seed and collision-free). Normal activity always uses
+    the primary IP. Attacker / new-IP telemetry is allocated from the
+    disjoint ATTACKER_SUBNET via a counter, so it can never accidentally
+    equal a primary IP. AUTH-003 therefore fires only on intentional
+    new-IP behavior, never on background randomness.
+    """
 
     def __init__(self, seed: int):
+        import ipaddress
+
         self.seed = seed
         self.rng = random.Random(seed)
         self.seq = 0
+        pool = [str(a) for a in ipaddress.ip_network(PRIMARY_SUBNET).hosts()][10:250]
+        self.rng.shuffle(pool)
+        identities = USERS + SERVICE_ACCOUNTS
+        assert len(pool) >= len(identities), "primary IP pool exhausted"
+        self._primary = {u: pool[i] for i, u in enumerate(identities)}
+        self._attacker_net = ipaddress.ip_network(ATTACKER_SUBNET)
+        self._attacker_next = 11
+
+    def primary_ip(self, user: str) -> str:
+        return self._primary[user]
+
+    def attacker_ip(self) -> str:
+        """Fresh controlled non-primary IP; consistent only if caller reuses it."""
+        ip = str(self._attacker_net[self._attacker_next])
+        self._attacker_next += 1
+        return ip
 
     def event_id(self, scenario_id: str) -> str:
         self.seq += 1
@@ -177,9 +213,10 @@ def normal_event(ctx: Ctx, day: int, sid: str) -> dict:
         ["auth", "proc", "dns", "net", "file", "xfer"],
         weights=[30, 20, 20, 12, 8, 10], k=1)[0]
     ts, user, host = _business_ts(ctx, day), ctx.user(), ctx.host()
+    pip = ctx.primary_ip(user)  # normal traffic always uses the stable primary IP
     if kind == "auth":
         return _base(ctx, sid, "normal", ts, "authentication", ctx.rng.choice(["windows", "linux"]),
-                     host=host, user=user, source_ip=ctx.ip(),
+                     host=host, user=user, source_ip=pip,
                      status="success" if ctx.rng.random() < 0.95 else "failed")
     if kind == "proc":
         proc, parent, cmd = ctx.rng.choice(BENIGN_PROCESSES)
@@ -188,13 +225,13 @@ def normal_event(ctx: Ctx, day: int, sid: str) -> dict:
                      parent_process=parent, command_line=cmd, status="started")
     if kind == "dns":
         return _base(ctx, sid, "normal", ts, "dns_query", "dns",
-                     host=host, user=user, source_ip=ctx.ip(),
+                     host=host, user=user, source_ip=pip,
                      destination_ip=DNS_RESOLVER, destination_port=53,
                      protocol="UDP", domain=ctx.rng.choice(BENIGN_DOMAINS),
                      status="resolved")
     if kind == "net":
         return _base(ctx, sid, "normal", ts, "network_connection", "firewall",
-                     host=host, user=user, source_ip=ctx.ip(),
+                     host=host, user=user, source_ip=pip,
                      destination_ip=ctx.ip(), destination_port=ctx.rng.choice(NORMAL_PORTS),
                      protocol="TCP", bytes_sent=ctx.rng.randint(1_000, 2_000_000),
                      bytes_received=ctx.rng.randint(1_000, 5_000_000), status="allowed")
@@ -204,7 +241,7 @@ def normal_event(ctx: Ctx, day: int, sid: str) -> dict:
                      process_name=ctx.rng.choice(BENIGN_PROCESSES)[0],
                      file_hash=ctx.hex_hash(), status="created")
     return _base(ctx, sid, "normal", ts, "data_transfer", ctx.rng.choice(["firewall", "endpoint"]),
-                 host=host, user=user, source_ip=ctx.ip(), destination_ip=ctx.ip(),
+                 host=host, user=user, source_ip=pip, destination_ip=ctx.ip(),
                  destination_port=443, protocol="TCP",
                  bytes_sent=ctx.rng.randint(1 * MB, 150 * MB), status="completed")
 
@@ -212,8 +249,10 @@ def normal_event(ctx: Ctx, day: int, sid: str) -> dict:
 # --------------------------------------------------------------- scenarios ---
 
 def scen_brute_force(ctx: Ctx, n: int) -> list[dict]:
-    """Multiple failed logons then one success. Telemetry only."""
-    out, user, host, ip = [], ctx.user(), ctx.host(), ctx.ip()
+    """Multiple failed logons then one success, one consistent attacker IP
+    (distinct from the victim's primary IP). Telemetry only."""
+    out, user, host = [], ctx.user(), ctx.host()
+    ip = ctx.attacker_ip()
     day = ctx.rng.randint(0, 4)
     t0 = ANCHOR + timedelta(days=day, hours=ctx.rng.randint(0, 23))
     sid = f"brute_force_{ctx.seed}_{n:03d}"
@@ -228,8 +267,10 @@ def scen_brute_force(ctx: Ctx, n: int) -> list[dict]:
 
 
 def scen_suspicious_process(ctx: Ctx, n: int) -> list[dict]:
-    """Login -> parent process -> child process with benign inventory cmdline."""
-    user, host, ip = ctx.user(), ctx.host(), ctx.ip()
+    """Login -> parent process -> child process with benign inventory cmdline.
+    Uses the user's primary IP (no new-IP intent; process rules are the signal)."""
+    user, host = ctx.user(), ctx.host()
+    ip = ctx.primary_ip(user)
     t0 = _business_ts(ctx, ctx.rng.randint(0, 4))
     sid = f"suspicious_process_{ctx.seed}_{n:03d}"
     return [
@@ -253,27 +294,31 @@ def scen_suspicious_process(ctx: Ctx, n: int) -> list[dict]:
 
 
 def scen_unusual_login(ctx: Ctx, n: int) -> list[dict]:
-    """Same user: daytime baseline over prior days + one 03:xx login."""
-    user, host, ip = ctx.user(), ctx.host(), ctx.ip()
+    """Same user: daytime baseline (primary IP) over prior days, then one 03:xx
+    login from a controlled new IP. Represents unusual time AND new source."""
+    user, host = ctx.user(), ctx.host()
+    base_ip, night_ip = ctx.primary_ip(user), ctx.attacker_ip()
     day = ctx.rng.randint(2, 4)
     sid = f"unusual_login_{ctx.seed}_{n:03d}"
     out = [
         _base(ctx, sid, "unusual_login",
               ANCHOR + timedelta(days=day - d, hours=1, minutes=ctx.rng.randint(0, 59)),
               "authentication", "windows", host=host, user=user,
-              source_ip=ip, status="success")
+              source_ip=base_ip, status="success")
         for d in (2, 1)
     ]
     out.append(_base(ctx, sid, "unusual_login",
                      ANCHOR + timedelta(days=day, hours=-5, minutes=ctx.rng.randint(10, 50)),
                      "authentication", "windows", host=host, user=user,
-                     source_ip=ip, status="success"))
+                     source_ip=night_ip, status="success"))
     return out
 
 
 def scen_suspicious_network(ctx: Ctx, n: int) -> list[dict]:
-    """Login -> connection to documentation-range external host."""
-    user, host, ip = ctx.user(), ctx.host(), ctx.ip()
+    """Login -> connection to documentation-range external host.
+    Source stays the user's primary IP (IOC match is the signal, not new-IP)."""
+    user, host = ctx.user(), ctx.host()
+    ip = ctx.primary_ip(user)
     t0 = _business_ts(ctx, ctx.rng.randint(0, 4))
     sid = f"suspicious_network_{ctx.seed}_{n:03d}"
     return [
@@ -292,8 +337,10 @@ def scen_suspicious_network(ctx: Ctx, n: int) -> list[dict]:
 
 
 def scen_data_spike(ctx: Ctx, n: int) -> list[dict]:
-    """Normal 50-110 MB transfers then one ~4 GB transfer. Telemetry only."""
-    user, host, ip = ctx.user(), ctx.host(), ctx.ip()
+    """Normal 50-110 MB transfers then one ~4 GB transfer, all from the user's
+    primary IP. Telemetry only."""
+    user, host = ctx.user(), ctx.host()
+    ip = ctx.primary_ip(user)
     day = ctx.rng.randint(1, 4)
     sid = f"data_spike_{ctx.seed}_{n:03d}"
     out = [
@@ -315,8 +362,13 @@ def scen_data_spike(ctx: Ctx, n: int) -> list[dict]:
 
 def scen_credential_compromise(ctx: Ctx, n: int, fixed_id: str | None = None) -> list[dict]:
     """PRIMARY DEMO: fails -> success -> process -> shell telemetry ->
-    external connection -> large transfer. All benign telemetry text."""
-    user, host, ip = ctx.user(), ctx.host(), ctx.ip()
+    external connection -> large transfer. The whole chain originates from ONE
+    controlled attacker IP distinct from the victim's primary IP, so the story
+    stays coherent: normal-IP history, then new-IP attack activity. All benign
+    telemetry text."""
+    user, host = ctx.user(), ctx.host()
+    ip = ctx.attacker_ip()
+    assert ip != ctx.primary_ip(user), "attacker IP must differ from primary"
     t0 = ANCHOR + timedelta(days=ctx.rng.randint(1, 4), hours=1,
                             minutes=ctx.rng.randint(0, 59), seconds=2)
     sid = fixed_id or f"credential_compromise_{ctx.seed}_{n:03d}"
@@ -353,8 +405,10 @@ def scen_credential_compromise(ctx: Ctx, n: int, fixed_id: str | None = None) ->
 
 
 def scen_benign_volume(ctx: Ctx, n: int) -> list[dict]:
-    """Legitimate high-volume service workload (negative example)."""
+    """Legitimate high-volume service workload (negative example). The service
+    account uses its stable primary IP throughout — volume, not new IPs."""
     svc, host = ctx.rng.choice(SERVICE_ACCOUNTS), f"SRV-{ctx.rng.randint(1, 4):03d}"
+    svc_ip = ctx.primary_ip(svc)
     t0 = _business_ts(ctx, ctx.rng.randint(0, 4))
     sid = f"benign_volume_{ctx.seed}_{n:03d}"
     out = []
@@ -362,11 +416,11 @@ def scen_benign_volume(ctx: Ctx, n: int) -> list[dict]:
         ts = t0 + timedelta(minutes=i * 5)
         if i % 3 == 0:
             out.append(_base(ctx, sid, "benign_volume", ts, "authentication",
-                             "linux", host=host, user=svc, source_ip=ctx.ip(),
+                             "linux", host=host, user=svc, source_ip=svc_ip,
                              status="success"))
         else:
             out.append(_base(ctx, sid, "benign_volume", ts, "data_transfer",
-                             "endpoint", host=host, user=svc, source_ip=ctx.ip(),
+                             "endpoint", host=host, user=svc, source_ip=svc_ip,
                              destination_ip=ctx.ip(), destination_port=443,
                              protocol="TCP",
                              bytes_sent=ctx.rng.randint(50 * MB, 300 * MB),

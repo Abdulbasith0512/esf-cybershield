@@ -60,7 +60,7 @@ Out-of-order: engine sorts by timestamp before evaluation; verified identical ou
 |---|---|---|
 | AUTH-001 | 61 | brute-force chains + credential_compromise_001 |
 | AUTH-002 | 425 | unusual_login nights + late random logons |
-| AUTH-003 | 2665 | high count is dataset noise (random source IP per event); window-relative by design |
+| AUTH-003 | 125 | intentional new-IP scenarios only (58 brute-force, 66 unusual-login, 1 cred-comp; 0 normal/benign) |
 | PROC-001 / PROC-002 | 51 / 51 | sus_process chains + credential_compromise_001 |
 | NET-001 | 150 | doc-range external conns incl. credential_compromise_001 |
 | NET-002 | 0 | dataset has no DNS bursts — covered by unit test |

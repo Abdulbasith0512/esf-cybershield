@@ -30,6 +30,26 @@ known scenario -> events -> (later) rules -> correlation -> incident -> risk
 
 Default mix: normal 88%, brute_force 3%, suspicious_process/network/unusual_login 2% each, data_spike/credential_compromise/benign_volume ~1% each. Override with `--scenario-mix normal=0.8,...` (weights sum ~1.0).
 
+## Behavioral model: user → stable primary source IP
+
+Every identity (`user_001…`, service accounts) owns exactly one primary IP
+in `10.10.10.0/24`, assigned by a seeded shuffle — deterministic per seed,
+collision-free. Normal traffic (`normal`, `benign_volume`,
+`suspicious_process`, `suspicious_network`, `data_spike`) always uses the
+primary IP. Controlled new-IP telemetry is allocated from the disjoint
+`192.168.50.0/24` range and only where semantically intended:
+
+- `brute_force`: whole chain from one attacker IP (≠ victim primary)
+- `unusual_login`: baseline on primary IP, 03:xx login on a new IP
+- `credential_compromise`: whole chain on one attacker IP (≠ victim primary)
+
+AUTH-003 is intentionally designed to detect deviations from historical
+user/source-IP behavior, so on realistic data it fires (almost) only on
+these intentional scenarios — e.g. 125 detections on the 10k/seed-42
+dataset, all in `brute_force`/`unusual_login`/`credential_compromise`,
+zero in `normal`/`benign_volume` (previously 2,665 under random-IP
+assignment).
+
 ## Event schema & vocabulary
 
 Every record is a valid Slice 1 `EventCreate`: `event_id` (UUIDv5, unique),

@@ -143,3 +143,57 @@ def test_command_lines_benign():
                   "cobalt strike", "frombase64string", "-enc ", "-encodedcommand",
                   "downloadstring", "iex(", "certutil -urlcache", "bitsadmin"):
         assert token not in blob, f"banned token {token!r} in telemetry"
+
+
+def test_primary_ip_mapping_stable_unique_private():
+    import ipaddress
+
+    ctx = gen.Ctx(42)
+    ips = [ctx.primary_ip(u) for u in gen.USERS + gen.SERVICE_ACCOUNTS]
+    assert len(set(ips)) == len(ips)  # no accidental sharing
+    assert ctx.primary_ip("user_001") == gen.Ctx(42).primary_ip("user_001")
+    for ip in ips:
+        assert ipaddress.ip_address(ip).is_private
+
+
+def test_normal_users_stable_source_ip():
+    evts = gen.generate(42, 2000, gen.DEFAULT_MIX)
+    per_user: dict[str, set] = {}
+    for e in evts:
+        if e["raw_event"]["scenario_type"] == "normal" and e["event_type"] == "authentication":
+            per_user.setdefault(e["user"], set()).add(e["source_ip"])
+    assert len(per_user) > 10
+    assert all(len(v) == 1 for v in per_user.values()), "normal auth must use the primary IP"
+
+
+def test_benign_volume_stable_ip():
+    ctx = gen.Ctx(9)
+    chain = gen.scen_benign_volume(ctx, 1)
+    auth = [e for e in chain if e["event_type"] == "authentication"]
+    assert len({e["source_ip"] for e in auth}) == 1
+    assert auth[0]["source_ip"] == ctx.primary_ip(auth[0]["user"])
+
+
+def test_brute_force_consistent_attacker_ip():
+    ctx = gen.Ctx(9)
+    chain = gen.scen_brute_force(ctx, 1)
+    ips = {e["source_ip"] for e in chain}
+    assert len(ips) == 1
+    (ip,) = ips
+    assert ip != ctx.primary_ip(chain[0]["user"])
+
+
+def test_cred_comp_controlled_new_ip():
+    ctx = gen.Ctx(9)
+    chain = gen.scen_credential_compromise(ctx, 1, fixed_id="credential_compromise_001")
+    auth = [e for e in chain if e["event_type"] == "authentication"]
+    assert len({e["source_ip"] for e in auth}) == 1  # coherent single attacker IP
+    assert auth[0]["source_ip"] != ctx.primary_ip(auth[0]["user"])
+
+
+def test_unusual_login_new_ip():
+    ctx = gen.Ctx(9)
+    chain = gen.scen_unusual_login(ctx, 1)
+    base = {e["source_ip"] for e in chain[:-1]}
+    assert len(base) == 1  # baseline shares the primary IP
+    assert chain[-1]["source_ip"] not in base  # night login is the new IP
