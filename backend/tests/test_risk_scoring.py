@@ -106,6 +106,62 @@ def test_duplicates_dont_multiply():
     assert multi - one < 20
 
 
+def _enriched_band(dets):
+    from app.services.mitre.scorer import _band
+
+    score, _, _ = scored(dets)[:3]
+    return score, _band(score, RiskConfig())
+
+
+def test_band_boundaries():
+    from app.services.mitre.scorer import _band
+
+    cfg = RiskConfig()
+    assert _band(0, cfg) == "LOW" and _band(24, cfg) == "LOW"
+    assert _band(25, cfg) == "MEDIUM" and _band(49, cfg) == "MEDIUM"
+    assert _band(50, cfg) == "HIGH" and _band(79, cfg) == "HIGH"
+    assert _band(80, cfg) == "CRITICAL" and _band(100, cfg) == "CRITICAL"
+
+
+def test_single_ioc_not_critical():
+    # Lone IOC string-match (~77-78) is HIGH priority, not drop-everything.
+    score, band = _enriched_band(
+        [devt("NET-001", start_min=0, conf=0.9,
+              extra_meta={"matched_ioc": {"indicator": "x"}})])
+    assert band == "HIGH" and score < 80
+
+
+def test_multisignal_reaches_critical():
+    score, band = _enriched_band(
+        [devt("AUTH-001", start_min=0), devt("PROC-001", start_min=5),
+         devt("NET-001", start_min=9),
+         devt("DATA-001", start_min=12,
+              extra_meta={"bytes_sent": 4_000_000_000, "threshold": 1_000_000_000})])
+    assert band == "CRITICAL" and score >= 80
+
+
+def test_score_independent_of_bands():
+    from app.services.mitre.config import RiskConfig as RC
+
+    dets = [devt("AUTH-001", start_min=0), devt("PROC-001", start_min=5)]
+    inc = incident_for(dets)
+    mp = {d.detection_id: d for d in dets}
+    from app.services.mitre.mapper import map_incident
+
+    mappings = map_incident(inc, mp)
+    s1, _, _ = score_risk(inc, mp, mappings)
+    alt = RC(bands=((99, "LOW"), (100, "CRITICAL")))
+    from app.services.mitre.scorer import score_risk as _score
+
+    s2, _, _ = _score(inc, mp, mappings, alt)
+    assert s1 == s2  # thresholds move labels, never the number
+
+
+def test_deterministic_band_assignment():
+    dets = [devt("AUTH-001", start_min=0), devt("NET-001", start_min=5)]
+    assert _enriched_band(dets) == _enriched_band(list(reversed(dets)))
+
+
 def test_remove_data_decreases_risk():
     # Pair below the 100-cap so the DATA-001 contribution is visible.
     full = [devt("AUTH-001", start_min=0),

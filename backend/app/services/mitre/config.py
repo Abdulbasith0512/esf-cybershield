@@ -26,8 +26,11 @@ class RiskConfig:
     # MITRE: per distinct tactic, capped.
     mitre_per_tactic: int = 3
     mitre_cap: int = 12
-    # Bands: (upper_bound_inclusive, band).
-    bands: tuple = ((24, "LOW"), (49, "MEDIUM"), (74, "HIGH"), (100, "CRITICAL"))
+    # Bands: (upper_bound_inclusive, band). Operational interpretation only;
+    # scores are unaffected by these thresholds. CRITICAL starts at 80 so a
+    # single-signal incident (observed max 78-79: lone IOC/process hit) can
+    # never be CRITICAL; multi-signal stories start at 80. See docs/mitre-risk.md.
+    bands: tuple = ((24, "LOW"), (49, "MEDIUM"), (79, "HIGH"), (100, "CRITICAL"))
 
 
 DEFAULT_RISK = RiskConfig()
