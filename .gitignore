@@ -24,6 +24,7 @@ dist-ssr/
 data/raw/*
 data/processed/*
 data/synthetic/*
+data/public/cse_cic_ids2018/raw/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/synthetic/.gitkeep
