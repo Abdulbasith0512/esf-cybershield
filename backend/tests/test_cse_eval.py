@@ -308,3 +308,100 @@ def test_overall_no_averaged_f1():
     overall = ev.overall_summary([det("FLOW-001", ["e2"]), det("FLOW-002", ["e1"])], labels)
     assert "f1_mean" not in overall and "macro" not in str(overall)
     assert overall["covered_events"] == 2 and overall["total_detections"] == 2
+
+
+# O. evaluator cleanup: exactly one effective build_time_index, no dead helpers.
+def test_single_build_time_index_definition():
+    text = (BACKEND / "app" / "services" / "datasets" / "evaluate.py").read_text(encoding="utf-8")
+    assert text.count("def build_time_index(") == 1
+    assert "def iter_indexed_rows(" not in text
+    assert text.count("def flush(") == 1
+    assert "noqa: F401 (documented use)" not in text
+
+
+# P. quoted CSV rows remain accepted consistently (same as DictReader path).
+def test_quoted_rows_accepted_in_time_index():
+    import csv as _csv
+
+    from app.services.detect.flow.config import FlowConfig
+
+    scratch = Path(tempfile.mkdtemp(prefix="esf-eval-quoted-"))
+    try:
+        cols = ["Dst Port", "Protocol", "Timestamp", "Flow Duration", "Tot Fwd Pkts",
+                "Tot Bwd Pkts", "TotLen Fwd Pkts", "TotLen Bwd Pkts", "Label"]
+        target = scratch / "quoted.csv"
+        with target.open("w", encoding="utf-8", newline="") as handle:
+            writer = _csv.DictWriter(handle, fieldnames=cols, quoting=_csv.QUOTE_ALL)
+            writer.writeheader()
+            for i in range(6):
+                writer.writerow({"Dst Port": "443", "Protocol": "6",
+                                 "Timestamp": f"14/02/2018 08:00:{i:02d}",
+                                 "Flow Duration": "100", "Tot Fwd Pkts": "2",
+                                 "Tot Bwd Pkts": "2", "TotLen Fwd Pkts": "200",
+                                 "TotLen Bwd Pkts": "100", "Label": "Benign"})
+        # DictReader path accepts quotes; time index must too (no AdapterError).
+        index, rejected = ev.build_time_index(adapter, target, target.name)
+        assert rejected == 0 and len(index) == 6
+        dets_time = ev.chunked_detect(adapter, target, target.name, FlowConfig(),
+                                      chunk_rows=2, overlap_minutes=40, order="time")
+        dets_file = ev.chunked_detect(adapter, target, target.name, FlowConfig(),
+                                      chunk_rows=2, overlap_minutes=40, order="file")
+        assert {d.fingerprint for d in dets_time} == {d.fingerprint for d in dets_file}
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+# Q. deterministic (epoch, source_row) ordering, including tie-breaker.
+def test_time_order_deterministic_epoch_source_row():
+    import csv as _csv
+
+    from app.services.detect.flow.config import FlowConfig
+
+    scratch = Path(tempfile.mkdtemp(prefix="esf-eval-order-"))
+    try:
+        cols = ["Dst Port", "Protocol", "Timestamp", "Flow Duration", "Tot Fwd Pkts",
+                "Tot Bwd Pkts", "TotLen Fwd Pkts", "TotLen Bwd Pkts", "Label"]
+        target = scratch / "unordered.csv"
+        # Physically unordered input with duplicate timestamps (tie-breaker).
+        stamps = ["08:00:05", "08:00:01", "08:00:05", "08:00:00", "08:00:01", "08:00:03"]
+        with target.open("w", encoding="utf-8", newline="") as handle:
+            writer = _csv.DictWriter(handle, fieldnames=cols)
+            writer.writeheader()
+            for ts in stamps:
+                writer.writerow({"Dst Port": "443", "Protocol": "6",
+                                 "Timestamp": f"14/02/2018 {ts}",
+                                 "Flow Duration": "100", "Tot Fwd Pkts": "2",
+                                 "Tot Bwd Pkts": "2", "TotLen Fwd Pkts": "200",
+                                 "TotLen Bwd Pkts": "100", "Label": "Benign"})
+        index, _ = ev.build_time_index(adapter, target, target.name)
+        assert len(index) == 6
+        ordered = sorted(index, key=lambda e: (e[0], e[1]))
+        # Epochs non-decreasing; equal epochs ordered by source_row.
+        for a, b in zip(ordered, ordered[1:]):
+            assert (a[0], a[1]) <= (b[0], b[1])
+        dup_epoch = [e for e in ordered if e[0] == ordered[1][0]]
+        assert [e[1] for e in dup_epoch] == sorted(e[1] for e in dup_epoch)
+        cfg = FlowConfig()
+        first = {d.fingerprint for d in ev.chunked_detect(
+            adapter, target, target.name, cfg, chunk_rows=2, overlap_minutes=40, order="time")}
+        second = {d.fingerprint for d in ev.chunked_detect(
+            adapter, target, target.name, cfg, chunk_rows=2, overlap_minutes=40, order="time")}
+        assert first == second
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+# R. CLI --order file/time wiring (default time, passed to chunked_detect).
+def test_cli_order_flag_wiring():
+    import inspect
+
+    repo = BACKEND.parent
+    text = (repo / "scripts" / "evaluate_cse_cic_ids2018.py").read_text(encoding="utf-8")
+    assert "--order" in text
+    assert 'choices=["file", "time"]' in text or "choices=['file', 'time']" in text
+    assert 'default="time"' in text or "default='time'" in text
+    assert "order=args.order" in text
+    assert '"order": args.order' in text or "'order': args.order" in text
+    sig = inspect.signature(ev.chunked_detect)
+    assert "order" in sig.parameters
+    assert sig.parameters["order"].default == "file"

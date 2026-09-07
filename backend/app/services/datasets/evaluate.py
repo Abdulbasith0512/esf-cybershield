@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import csv as _csv_module
+
 BENIGN_LABEL = "Benign"
 
 
@@ -201,15 +203,73 @@ def parse_ts(value: Any) -> datetime | None:
     return moment
 
 
+def build_time_index(adapter, path: Path, source_file: str,
+                     limit: int | None = None) -> tuple[list[tuple[float, int, int]], int]:
+    """Single streaming pass building a compact (epoch, source_row, offset) index.
+
+    Byte offsets address data-line starts so rows can be retrieved in any
+    order later without re-scanning per row. Only compact triples are kept —
+    never normalized events. Rejected rows are counted, never raised.
+    """
+    resolved = Path(path)
+    index: list[tuple[float, int, int]] = []
+    rejected = 0
+    header = read_header_fields(resolved)
+    with resolved.open("rb") as handle:
+        handle.readline()  # header consumed once; offsets address data lines
+        emitted = 0
+        while True:
+            if limit is not None and emitted >= limit:
+                break
+            offset = handle.tell()
+            line = handle.readline()
+            if not line:
+                break
+            if next(_csv_module.reader([line.decode("utf-8")]), None) == []:
+                continue  # blank line: DictReader skips these without consuming a row number
+            emitted += 1
+            source_row = emitted
+            values = next(_csv_module.reader([line.decode("utf-8")]))
+            row: dict[str, str] = {}
+            for pos, key in enumerate(header):
+                row[key] = values[pos] if pos < len(values) else ""
+            result = adapter.normalize_row(row, source_file=source_file,
+                                           source_row=source_row)
+            if not result.ok or result.event is None:
+                rejected += 1
+                continue
+            moment = parse_ts(result.event.get("timestamp"))
+            if moment is None:
+                rejected += 1
+                continue
+            index.append((moment.timestamp(), source_row, offset))
+    return index, rejected
+
+
+def read_header_fields(path: Path) -> list[str]:
+    """Header field names verbatim, matching the adapter's input contract."""
+    with Path(path).open("rb") as handle:
+        first = handle.readline()
+        if not first:
+            from app.services.datasets.base import AdapterError
+
+            raise AdapterError(f"CSV has no header row: {path}")
+        return next(_csv_module.reader([first.decode("utf-8-sig")]))
+
+
 def chunked_detect(adapter, path: Path, source_file: str, config,
                    chunk_rows: int, overlap_minutes: int,
-                   limit: int | None = None) -> list:
+                   limit: int | None = None, order: str = "file") -> list:
     """Stream a large CSV in bounded row blocks with temporal overlap carry.
 
     Each block is adapted, merged with prior events younger than
     (block_max - overlap), and fed to detect_flows; detections union by
     fingerprint. FLOW-005 (session catalog) is excluded here and handled by
     session_rule_sample on a bounded stride sample instead.
+
+    order="file" preserves the legacy row-order path exactly. order="time"
+    builds a timestamp index first and processes time-contiguous chunks, so
+    the overlap carry stays bounded on physically unordered input.
     """
     from app.services.detect.flow import detect_flows
 
@@ -225,6 +285,18 @@ def chunked_detect(adapter, path: Path, source_file: str, config,
                 continue
             seen.setdefault(det.fingerprint, det)
 
+    def flush_block(block: list[dict], carry: list[dict]) -> list[dict]:
+        edge = block_edge(block, overlap)
+        window = block + [e for e in carry
+                          if _is_fresh(parse_ts(e.get("timestamp")), edge)]
+        flush(window)
+        return _carry_events(block, carry, overlap)
+
+    if order == "time":
+        return _chunked_detect_time_ordered(
+            adapter, path, source_file, config, chunk_rows, overlap,
+            limit, flush, seen)
+
     for _, raw in adapter.iter_rows(path, limit=limit):
         result = adapter.normalize_row(raw, source_file=source_file,
                                        source_row=adapted_total + 1)
@@ -233,13 +305,76 @@ def chunked_detect(adapter, path: Path, source_file: str, config,
             continue
         block.append(result.event)
         if len(block) >= chunk_rows:
-            window = block + [e for e in carry if _fresh(e, block, overlap)]
-            flush(window)
-            carry = _carry_events(block, carry, overlap)
+            carry = flush_block(block, carry)
             block = []
     if block:
-        flush(block + [e for e in carry if _fresh(e, block, overlap)])
+        carry = flush_block(block, carry)
     return sorted(seen.values(), key=lambda d: d.fingerprint)
+
+
+def _chunked_detect_time_ordered(adapter, path: Path, source_file: str, config,
+                                 chunk_rows: int, overlap: timedelta,
+                                 limit: int | None, flush, seen: dict) -> list:
+    """Time-ordered chunked detection over a timestamp index.
+
+    The index is partitioned into consecutive time-contiguous groups of at
+    most chunk_rows rows; each group is retrieved via byte offsets (single
+    file handle, offset-sorted reads), adapted, merged with the overlap
+    carry, and flushed. Carry stays bounded because each group spans a
+    narrow time range. Deterministic: index order is (epoch, source_row).
+    """
+    from app.services.detect.flow import detect_flows
+
+    resolved = Path(path)
+    index, _ = build_time_index(adapter, resolved, source_file, limit)
+    ordered = sorted(index, key=lambda e: (e[0], e[1]))
+    header = read_header_fields(resolved)
+    carry: list[dict] = []
+    with resolved.open("rb") as handle:
+        handle.readline()  # header consumed once; offsets address data lines
+        pos = 0
+        total = len(ordered)
+        while pos < total:
+            group = ordered[pos:pos + chunk_rows]
+            pos += len(group)
+            block = _read_group(handle, header, group, adapter, source_file)
+            if not block:
+                continue
+            edge = block_edge(block, overlap)
+            window = block + [e for e in carry
+                              if _is_fresh(parse_ts(e.get("timestamp")), edge)]
+            for det in detect_flows(window, config=config):
+                if det.rule_id == "FLOW-005":
+                    continue
+                seen.setdefault(det.fingerprint, det)
+            carry = _carry_events(block, carry, overlap)
+    return sorted(seen.values(), key=lambda d: d.fingerprint)
+
+
+def _read_group(handle, header: list[str], group: list, adapter,
+                source_file: str) -> list[dict]:
+    """Adapt one time-contiguous index group. Reads members in file-offset
+    order (near-sequential I/O), then orders events by (epoch, source_row)
+    matching the index. Malformed lines are skipped, never raised."""
+    members = sorted(group, key=lambda e: e[2])
+    ordered: list[tuple[float, int, dict]] = []
+    for _, source_row, offset in members:
+        handle.seek(offset)
+        line = handle.readline()
+        if not line or not line.strip():
+            continue
+        values = next(_csv_module.reader([line.decode("utf-8")]))
+        row: dict[str, str] = {}
+        for pos, key in enumerate(header):
+            row[key] = values[pos] if pos < len(values) else ""
+        result = adapter.normalize_row(row, source_file=source_file,
+                                       source_row=source_row)
+        if result.ok and result.event is not None:
+            moment = parse_ts(result.event.get("timestamp"))
+            epoch = moment.timestamp() if moment is not None else float("inf")
+            ordered.append((epoch, source_row, result.event))
+    ordered.sort(key=lambda t: (t[0], t[1]))
+    return [event for _, _, event in ordered]
 
 
 def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
@@ -380,23 +515,32 @@ def collect_evidence_labels(adapter, path: Path, source_file: str,
     return labels_by_id, dict(totals), rejected
 
 
-def _fresh(event: dict, block: list[dict], overlap: timedelta) -> bool:
+def block_edge(block: list[dict], overlap: timedelta) -> datetime | None:
+    """Newest block timestamp minus overlap, computed once per block."""
     moments = [parse_ts(e.get("timestamp")) for e in block]
     moments = [m for m in moments if m is not None]
     if not moments:
-        return False
-    edge = max(moments) - overlap
-    moment = parse_ts(event.get("timestamp"))
-    return moment is not None and moment > edge
+        return None
+    return max(moments) - overlap
+
+
+def _is_fresh(moment: datetime | None, edge: datetime | None) -> bool:
+    return moment is not None and edge is not None and moment > edge
+
+
+def _fresh(event: dict, block: list[dict], overlap: timedelta) -> bool:
+    """Compatibility wrapper: edge recomputed per call (slow for large carry).
+
+    Hot paths precompute block_edge() once and use _is_fresh() instead.
+    """
+    return _is_fresh(parse_ts(event.get("timestamp")), block_edge(block, overlap))
 
 
 def _carry_events(block: list[dict], carry: list[dict], overlap: timedelta) -> list[dict]:
-    moments = [parse_ts(e.get("timestamp")) for e in block]
-    moments = [m for m in moments if m is not None]
-    if not moments:
+    edge = block_edge(block, overlap)
+    if edge is None:
         return carry
-    edge = max(moments) - overlap
-    kept = [e for e in block + carry if (parse_ts(e.get("timestamp")) or edge) > edge]
+    kept = [e for e in block + carry if (_is_fresh(parse_ts(e.get("timestamp")), edge))]
     by_id = {e["event_id"]: e for e in kept}
     return sorted(by_id.values(), key=lambda e: (str(e.get("timestamp")), e["event_id"]))
 

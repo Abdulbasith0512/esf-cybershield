@@ -90,6 +90,8 @@ def main() -> None:
     parser.add_argument("--chunk-rows", type=int, default=0,
                         help="Stream in blocks of N rows (0 = accumulate in memory).")
     parser.add_argument("--overlap-minutes", type=int, default=40)
+    parser.add_argument("--order", choices=["file", "time"], default="time",
+                        help="Row processing order for chunked evaluation (default: time).")
     parser.add_argument("--sample", type=int, default=0,
                         help="Label-blind reservoir sample size (0 = all rows).")
     parser.add_argument("--balanced", type=int, default=0,
@@ -128,7 +130,8 @@ def main() -> None:
         source_file = path.name
         if chunked:
             dets = chunked_detect(adapter, path, source_file, config,
-                                  args.chunk_rows, args.overlap_minutes, limit)
+                                  args.chunk_rows, args.overlap_minutes, limit,
+                                  order=args.order)
             if only_rules is not None:
                 dets = [d for d in dets if d.rule_id in only_rules]
             # Session-scoped rule: exact two-pass streaming when requested,
@@ -193,7 +196,8 @@ def main() -> None:
         label_totals = dict(Counter(labels.values()))
 
     params = {"limit": args.limit, "chunk_rows": args.chunk_rows,
-              "overlap_minutes": args.overlap_minutes, "sample": args.sample,
+              "overlap_minutes": args.overlap_minutes, "order": args.order,
+              "sample": args.sample,
               "balanced": args.balanced, "sample_seed": args.sample_seed,
               "rules": sorted(only_rules) if only_rules else "all",
               "adapter": ADAPTER_VERSION, "session_cap": args.session_cap,
