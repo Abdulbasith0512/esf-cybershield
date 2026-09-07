@@ -1,33 +1,109 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
+import { use, useState } from "react";
 import { ApiError, getIncident } from "@/lib/api-client";
 import { useApi } from "@/lib/use-api";
+import { useIncidentEvidence } from "@/lib/use-incident-evidence";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SeverityBadge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
+import { formatTime } from "@/components/dashboard/events-table";
+import { InvestigationTimeline } from "@/components/incidents/investigation-timeline";
+import { EvidenceSection } from "@/components/incidents/evidence-section";
+import { RiskBreakdownView } from "@/components/incidents/risk-breakdown";
+import { UebaObservations } from "@/components/incidents/ueba-observations";
+import { IncidentContext } from "@/components/incidents/incident-context";
+import { AttackStory } from "@/components/incidents/attack-story";
+import type { IncidentDetail } from "@/lib/types";
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("en-GB", { hour12: false });
+function CopyableId({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-2">
+      <code className="break-all font-mono text-xs text-soc-muted">{value}</code>
+      <button
+        type="button"
+        onClick={() => {
+          void navigator.clipboard?.writeText(value).then(
+            () => setCopied(true),
+            () => setCopied(false),
+          );
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        aria-label="Copy incident ID"
+        className="rounded border border-soc-border px-2 py-0.5 font-mono text-xs text-soc-text hover:bg-soc-border/50"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </span>
+  );
 }
 
-function KV({ label, value }: { label: string; value: string }) {
+function formatDuration(firstSeen: string, lastSeen: string): string {
+  const ms = new Date(lastSeen).getTime() - new Date(firstSeen).getTime();
+  if (Number.isNaN(ms) || ms < 0) return "—";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+function DetectionsByRule({ incident }: { incident: IncidentDetail }) {
+  const byRule = new Map<string, string[]>();
+  for (const m of incident.mitre_techniques) {
+    const list = byRule.get(m.source_rule_id) ?? [];
+    list.push(`${m.technique_id} ${m.technique_name}`);
+    byRule.set(m.source_rule_id, list);
+  }
   return (
-    <div className="flex flex-col border-b border-soc-border/50 pb-1">
-      <dt className="text-xs uppercase tracking-wide text-soc-muted">{label}</dt>
-      <dd className="break-all font-mono text-xs text-soc-text">{value}</dd>
+    <div className="flex flex-col gap-3">
+      {incident.detection_ids.length === 0 ? (
+        <EmptyState message="No detections attached to this incident." />
+      ) : (
+        <>
+          <ul className="flex flex-col gap-1 font-mono text-xs">
+            {incident.detection_ids.map((d) => (
+              <li key={d} className="break-all text-soc-text">
+                {d}
+              </li>
+            ))}
+          </ul>
+          {byRule.size > 0 && (
+            <div>
+              <h3 className="mb-1 text-xs uppercase tracking-wide text-soc-muted">
+                Grouped by MITRE source rule
+              </h3>
+              <ul className="flex flex-col gap-1 text-xs">
+                {[...byRule.entries()].map(([rule, techniques]) => (
+                  <li key={rule} className="font-mono text-soc-text">
+                    {rule} → {techniques.join(", ")}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <p className="text-xs text-soc-muted">
+            Full detection objects (rule names, severities, reasons) are not exposed by the
+            current API; only persisted detection IDs are shown. Techniques above come from
+            the incident&apos;s MITRE mappings.
+          </p>
+        </>
+      )}
     </div>
   );
 }
 
 export default function IncidentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  return <IncidentDetailView id={id} />;
+}
+
+export function IncidentDetailView({ id }: { id: string }) {
   const { data, error, loading, refresh } = useApi(`incident:${id}`, (signal) =>
     getIncident(decodeURIComponent(id), signal),
   );
+  const evidence = useIncidentEvidence(data ? data.evidence_event_ids : null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -37,7 +113,7 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
         </Link>
       </header>
 
-      {loading && <LoadingState message="Loading incident..." />}
+      {loading && <LoadingState message="Loading incident investigation..." />}
       {error && !loading && (
         <ErrorState
           message={
@@ -50,22 +126,30 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
       )}
       {data && (
         <>
-          <header className="flex flex-wrap items-center gap-3">
-            <h1 className="text-xl font-bold text-white">{data.title}</h1>
-            <SeverityBadge severity={data.severity} />
+          <header className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-xl font-bold text-white">{data.title}</h1>
+              <SeverityBadge severity={data.severity} />
+            </div>
+            <CopyableId value={data.incident_id} />
+            <p className="font-mono text-xs text-soc-muted">
+              {formatTime(data.first_seen)} → {formatTime(data.last_seen)} · duration{" "}
+              {formatDuration(data.first_seen, data.last_seen)} · confidence {data.confidence.toFixed(2)} ·
+              status {data.status}
+            </p>
           </header>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[
-              ["Status", data.status],
-              ["Risk", `${data.risk_score} / ${data.risk_band}`],
-              ["Confidence", data.confidence.toFixed(2)],
+              ["Deterministic risk", `${data.risk_score} / ${data.risk_band}`],
               [
                 "UEBA",
                 !data.ueba_evidence?.available
                   ? "n/a"
                   : `${data.ueba_evidence.anomaly_flag ? "Flagged" : "Clean"} (${data.ueba_evidence.anomaly_score?.toFixed(2) ?? "—"})`,
               ],
+              ["Detections", String(data.detection_ids.length)],
+              ["Evidence events", String(data.evidence_event_ids.length)],
             ].map(([label, value]) => (
               <div key={label} className="rounded-md border border-soc-border bg-soc-panel p-3">
                 <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
@@ -74,8 +158,39 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
             ))}
           </div>
 
-          <Card title="Reason">
-            <p className="text-sm text-soc-text">{data.reason}</p>
+          <Card title="Investigation summary">
+            <p className="text-sm leading-relaxed text-soc-text">{data.reason}</p>
+          </Card>
+
+          <Card title="Attack story">
+            {evidence.loading ? (
+              <LoadingState message="Loading security telemetry..." />
+            ) : (
+              <AttackStory incident={data} events={evidence.items} />
+            )}
+          </Card>
+
+          <Card
+            title={`Attack timeline (${evidence.items.length})`}
+            action={
+              <Button variant="ghost" onClick={refresh}>
+                Refresh
+              </Button>
+            }
+          >
+            {evidence.loading ? (
+              <LoadingState message="Loading security telemetry..." />
+            ) : (
+              <InvestigationTimeline
+                events={evidence.items}
+                firstSeen={data.first_seen}
+                lastSeen={data.last_seen}
+              />
+            )}
+          </Card>
+
+          <Card title={`Detection evidence (${data.detection_ids.length})`}>
+            <DetectionsByRule incident={data} />
           </Card>
 
           <Card title={`MITRE ATT&CK hypotheses (${data.mitre_techniques.length})`}>
@@ -98,46 +213,26 @@ export default function IncidentDetailPage({ params }: { params: Promise<{ id: s
             )}
           </Card>
 
-          <Card title={`UEBA behavioral evidence`}>
-            {!data.ueba_evidence?.available ? (
-              <EmptyState message="UEBA evidence unavailable for this incident." />
-            ) : (
-              <div className="flex flex-col gap-2 text-sm">
-                <p className="text-soc-text">{data.ueba_evidence.reason}</p>
-                <p className="font-mono text-xs text-soc-muted">
-                  model {data.ueba_evidence.model_version} · window {formatTime(data.ueba_evidence.feature_window_start ?? "")} →{" "}
-                  {formatTime(data.ueba_evidence.feature_window_end ?? "")}
-                </p>
-              </div>
-            )}
+          <Card title="UEBA behavioral evidence">
+            <UebaObservations ueba={data.ueba_evidence} />
           </Card>
 
-          <Card title={`Detections (${data.detection_ids.length})`}>
-            <ul className="flex flex-col gap-1 font-mono text-xs">
-              {data.detection_ids.map((d) => (
-                <li key={d} className="break-all text-soc-text">{d}</li>
-              ))}
-            </ul>
+          <Card title={`Risk breakdown`}>
+            <RiskBreakdownView breakdown={data.risk_breakdown} explanation={data.risk_explanation} />
           </Card>
 
           <Card title={`Evidence events (${data.evidence_event_ids.length})`}>
-            <p className="mb-2 text-xs text-soc-muted">
-              Look up individual events in the <Link href="/events" className="text-soc-accent underline">event browser</Link>.
-            </p>
-            <ul className="flex flex-col gap-1 font-mono text-xs">
-              {data.evidence_event_ids.map((e) => (
-                <li key={e} className="break-all text-soc-text">{e}</li>
-              ))}
-            </ul>
+            {evidence.loading ? (
+              <LoadingState message="Loading security telemetry..." />
+            ) : evidence.failed.length > 0 && evidence.items.length === 0 ? (
+              <ErrorState message="Unable to load incident evidence." />
+            ) : (
+              <EvidenceSection items={evidence.items} failed={evidence.failed} />
+            )}
           </Card>
 
-          <Card title="Timeline">
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
-              <KV label="First seen" value={formatTime(data.first_seen)} />
-              <KV label="Last seen" value={formatTime(data.last_seen)} />
-              <KV label="Incident ID" value={data.incident_id} />
-              <KV label="Risk breakdown" value={JSON.stringify(data.risk_breakdown)} />
-            </dl>
+          <Card title="Technical context">
+            <IncidentContext incident={data} />
           </Card>
 
           <div className="flex justify-end">
