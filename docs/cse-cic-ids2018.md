@@ -27,6 +27,29 @@ data/public/cse_cic_ids2018/raw/
 The raw CSVs are git-ignored (`*.csv` plus an explicit
 `data/public/cse_cic_ids2018/raw/*` rule) and never committed.
 
+## Dataset policy: fixed 1M-row working subset
+
+The original `02-20-2018.csv` (~7.9M rows) is retained untouched as the
+source archive. ESF CyberShield's official working/evaluation dataset is
+the fixed subset:
+
+```
+data/public/cse_cic_ids2018/working/02-20-2018-1m.csv
+```
+
+- Exactly the **first 1,000,000 data rows** of the source archive, header
+  preserved, original column order and values byte-identical, no
+  reordering or filtering.
+- Constructed by single-pass streaming (constant memory); verified by
+  header equality, exact row count, first/last row correspondence with
+  source rows 1 and 1,000,000, and SHA-256
+  `5669cfe2b1704fa35846ef527f5a3c504802bd7fb8ab1d6b8970c3e02b774bcb`
+  (see `backend/tests/test_working_dataset.py`).
+- All future detection evaluation, ML training, validation, testing,
+  calibration, and benchmarking MUST use this working file. The remaining
+  ~6.9M source rows must not be used.
+- Like the raw archive, the working file is git-ignored and never committed.
+
 ## Observed schema
 
 - 80 columns in 9 of 10 files: 79 CICFlowMeter features plus `Label`.
