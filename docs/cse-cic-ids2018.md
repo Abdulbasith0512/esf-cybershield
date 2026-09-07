@@ -95,10 +95,33 @@ python scripts/inspect_cse_cic_ids2018.py --input data/public/cse_cic_ids2018/ra
 python backend/.venv/Scripts/python.exe -m pytest backend/tests/test_cse_cic_ids2018.py -q
 ```
 
+## Slice 12B — controlled ingestion
+
+```powershell
+python scripts/ingest_cse_cic_ids2018.py --input data/public/cse_cic_ids2018/raw/02-14-2018.csv --limit 10000
+python scripts/ingest_cse_cic_ids2018.py --input data/public/cse_cic_ids2018/raw/02-14-2018.csv --limit 10000 --persist
+```
+
+Without `--persist` the script is dry-run only (zero writes). With `--persist`
+it validates every record against `EventCreate` and stores it through the
+existing `store_event` path in bounded batches (default 500, honoring
+`max_batch_size`). Repeating the same command only produces duplicates —
+never new rows. Production target is PostgreSQL via `DATABASE_URL`
+(`docker compose up -d postgres`); without it the script uses a local
+SQLite file through the identical code path.
+
+Dataset-scoped evaluation reads rows back with
+`WHERE source = 'cse_cic_ids2018'`, re-attaches UTC, and runs the existing
+`detect → correlate → enrich → UEBA attach` chain on that subset only.
+Expected on flow-only samples: near-zero detections (only `NET-001` on IOC
+matches and `DATA-001` past 1 GB can fire) and UEBA `unavailable`
+(user is null) — a limitation of flow telemetry, not a pipeline defect.
+
 ## Known limitations
 
 - UTC interpretation of zone-less capture timestamps is an assumption.
 - No user/host/authentication telemetry exists in these files; rules
   requiring those fields will not fire on adapted records.
 - `02-20-2018.csv` (4 GB) should be inspected with small `--limit` values.
-- Exact-duplicate flows share an event ID by design (idempotent dedupe).
+- Every valid source row becomes a distinct event, even with identical flow
+  fields; dedupe happens only on exact (file, row) re-ingestion.
