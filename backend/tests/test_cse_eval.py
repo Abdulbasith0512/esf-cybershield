@@ -196,6 +196,49 @@ def test_chunked_detect_small_file():
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def test_flow005_streaming_matches_rule():
+    """Streaming two-pass FLOW-005 must equal rule.evaluate byte-for-byte."""
+    import csv as _csv
+
+    from app.services.detect.common import prepare
+    from app.services.detect.flow.config import FlowConfig
+    from app.services.detect.flow.rules import ProtocolPortNovelty
+
+    scratch = Path(tempfile.mkdtemp(prefix="esf-eval-f005-"))
+    try:
+        cols = ["Dst Port", "Protocol", "Timestamp", "Flow Duration", "Tot Fwd Pkts",
+                "Tot Bwd Pkts", "TotLen Fwd Pkts", "TotLen Bwd Pkts", "Label"]
+        target = scratch / "novel.csv"
+        with target.open("w", encoding="utf-8", newline="") as handle:
+            writer = _csv.DictWriter(handle, fieldnames=cols)
+            writer.writeheader()
+            for i in range(10):
+                writer.writerow({"Dst Port": "443", "Protocol": "6",
+                                 "Timestamp": f"14/02/2018 08:00:{i:02d}",
+                                 "Flow Duration": "100", "Tot Fwd Pkts": "2",
+                                 "Tot Bwd Pkts": "2", "TotLen Fwd Pkts": "200",
+                                 "TotLen Bwd Pkts": "100", "Label": "Benign"})
+            for i in range(6):
+                writer.writerow({"Dst Port": "4443", "Protocol": "17",
+                                 "Timestamp": f"14/02/2018 08:05:{i:02d}",
+                                 "Flow Duration": "100", "Tot Fwd Pkts": "2",
+                                 "Tot Bwd Pkts": "2", "TotLen Fwd Pkts": "200",
+                                 "TotLen Bwd Pkts": "100", "Label": "Benign"})
+        config = FlowConfig()
+        streamed, _ = ev.evaluate_flow005_full(adapter, target, target.name, config)
+        events = []
+        for n, raw in adapter.iter_rows(target):
+            result = adapter.normalize_row(raw, source_file=target.name, source_row=n)
+            assert result.ok and result.event is not None
+            events.append(result.event)
+        direct = ProtocolPortNovelty(config).evaluate(prepare(events))
+        assert [(d.fingerprint, d.model_dump()) for d in streamed] == \
+               [(d.fingerprint, d.model_dump()) for d in direct]
+        assert len(streamed) == 1 and streamed[0].rule_id == "FLOW-005"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
 # L. no label access by production flow rules (AST)
 def test_no_label_in_flow_rules():
     import ast

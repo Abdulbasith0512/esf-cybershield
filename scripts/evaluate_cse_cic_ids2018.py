@@ -98,6 +98,9 @@ def main() -> None:
     parser.add_argument("--rules", default="", help="Comma-separated rule IDs to run (default: all).")
     parser.add_argument("--session-cap", type=int, default=50000,
                         help="Stride-sample cap for FLOW-005 under chunked mode.")
+    parser.add_argument("--flow005-full", action="store_true",
+                        help="Exact two-pass streaming FLOW-005 (complete catalog) "
+                             "instead of stride sample under chunked mode.")
     parser.add_argument("--outdir", default="evaluation/cse_cic_ids2018")
     args = parser.parse_args()
 
@@ -128,13 +131,24 @@ def main() -> None:
                                   args.chunk_rows, args.overlap_minutes, limit)
             if only_rules is not None:
                 dets = [d for d in dets if d.rule_id in only_rules]
-            # Session-scoped rule runs once over a bounded stride sample.
+            # Session-scoped rule: exact two-pass streaming when requested,
+            # otherwise the documented bounded stride sample.
             if only_rules is None or "FLOW-005" in only_rules:
-                sample = session_rule_sample(adapter, path, source_file,
-                                             args.session_cap, limit)
-                novice = ProtocolPortNovelty(config).evaluate(prepare(sample))
-                seen = {d.fingerprint for d in dets}
-                dets.extend(d for d in novice if d.fingerprint not in seen)
+                if args.flow005_full:
+                    from app.services.datasets.evaluate import evaluate_flow005_full
+
+                    full, info = evaluate_flow005_full(adapter, path, source_file,
+                                                       config, limit)
+                    stats["flow005_mode"] = "full-catalog"
+                    stats["flow005_overflow"] = info.get("overflow_pairs", False)
+                    seen = {d.fingerprint for d in dets}
+                    dets.extend(d for d in full if d.fingerprint not in seen)
+                else:
+                    sample = session_rule_sample(adapter, path, source_file,
+                                                 args.session_cap, limit)
+                    novice = ProtocolPortNovelty(config).evaluate(prepare(sample))
+                    seen = {d.fingerprint for d in dets}
+                    dets.extend(d for d in novice if d.fingerprint not in seen)
             all_dets.extend(dets)
         else:
             events, rejected, nrows = adapt_all(adapter, path, source_file, limit)
@@ -182,7 +196,8 @@ def main() -> None:
               "overlap_minutes": args.overlap_minutes, "sample": args.sample,
               "balanced": args.balanced, "sample_seed": args.sample_seed,
               "rules": sorted(only_rules) if only_rules else "all",
-              "adapter": ADAPTER_VERSION, "session_cap": args.session_cap}
+              "adapter": ADAPTER_VERSION, "session_cap": args.session_cap,
+              "flow005_full": args.flow005_full}
     run_id = run_id_for(files, params)
     per_rule = rule_metrics(all_dets, labels, support_positive, universe_size)
     overall = overall_summary(all_dets, labels, support_positive, universe_size)

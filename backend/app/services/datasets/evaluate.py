@@ -242,6 +242,91 @@ def chunked_detect(adapter, path: Path, source_file: str, config,
     return sorted(seen.values(), key=lambda d: d.fingerprint)
 
 
+def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
+                          limit: int | None = None,
+                          max_pairs: int = 100000) -> tuple[list, dict]:
+    """Exact streaming evaluation of the session-scoped FLOW-005 rule.
+
+    Replicates ProtocolPortNovelty semantics without holding all events:
+    pass 0 finds the time span, pass 1 builds the first-third catalog and
+    buffers (count + earliest-5, by timestamp then event_id) per novel pair.
+    Detections are built with make_result using the rule's own identity,
+    confidence, reason template, and metadata keys. A cross-validation test
+    locks equivalence with rule.evaluate on fixture data.
+    """
+    from app.services.detect.flow.rules import ProtocolPortNovelty
+    from app.services.detect.models import make_result
+
+    rule = ProtocolPortNovelty(config)
+    info: dict = {"mode": "full-catalog", "overflow_pairs": False,
+                  "catalog_pairs": 0}
+    tmin = tmax = None
+    for n, raw in adapter.iter_rows(path, limit=limit):
+        result = adapter.normalize_row(raw, source_file=source_file, source_row=n)
+        if not result.ok or result.event is None:
+            continue
+        moment = parse_ts(result.event.get("timestamp"))
+        if moment is None:
+            continue
+        if tmin is None or moment < tmin:
+            tmin = moment
+        if tmax is None or moment > tmax:
+            tmax = moment
+    if tmin is None:
+        return [], info
+    # Naive-UTC stamps matching engine.prepare, so make_result sees _ts.
+    from app.services.detect.common import coerce_ts
+
+    split = tmin + (tmax - tmin) / 3
+    catalog: set[tuple] = set()
+    counts: dict[tuple, int] = {}
+    earliest: dict[tuple, list] = {}
+    overflow = False
+    for n, raw in adapter.iter_rows(path, limit=limit):
+        result = adapter.normalize_row(raw, source_file=source_file, source_row=n)
+        if not result.ok or result.event is None:
+            continue
+        event = dict(result.event)
+        event["_ts"] = coerce_ts(event.get("timestamp"))
+        moment = parse_ts(event.get("timestamp"))
+        if moment is None:
+            continue
+        pair = (event.get("protocol"), event.get("destination_port"))
+        if moment < split:
+            catalog.add(pair)
+            continue
+        if pair in catalog:
+            continue
+        counts[pair] = counts.get(pair, 0) + 1
+        buf = earliest.setdefault(pair, [])
+        if len(buf) < 5 or moment < buf[-1][0]:
+            buf.append((moment, event["event_id"], event))
+            buf.sort(key=lambda t: (t[0], t[1]))
+            del buf[5:]
+        if len(counts) > max_pairs:
+            overflow = True
+            break
+    info["overflow_pairs"] = overflow
+    info["catalog_pairs"] = len(catalog)
+    out = []
+    threshold = config.novelty_min_flows
+    for pair in sorted(counts, key=lambda p: (str(p[0]), str(p[1]))):
+        if counts[pair] < threshold:
+            continue
+        proto, port = pair
+        members = sorted(earliest[pair], key=lambda t: (t[0], t[1]))
+        rows = [event for _, _, event in members[:5]]
+        out.append(make_result(
+            rule.rule_id, rule.name, rule.severity, 0.5,
+            (f"Unusual protocol/port combination observed: {proto}/{port} "
+             f"({counts[pair]} flows), unseen in baseline period."),
+            rows,
+            {"protocol": proto, "destination_port": port,
+             "count": counts[pair]}))
+    out.sort(key=lambda d: d.fingerprint)
+    return out, info
+
+
 def session_rule_sample(adapter, path: Path, source_file: str, cap: int,
                         limit: int | None = None) -> list[dict]:
     """Deterministic stride sample for the session-scoped FLOW-005 rule.
