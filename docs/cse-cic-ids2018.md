@@ -54,7 +54,7 @@ The same adapter handles both shapes by inspecting each file's header:
 
 | CSV column(s) | EventCreate field | Rule |
 |---|---|---|
-| (identity) | `event_id` | UUIDv5 over dataset + file + 12 stable flow fields; order-independent |
+| (identity) | `event_id` | UUIDv5 over dataset + adapter version + source file + 1-based source row; order-independent |
 | Timestamp | `timestamp` | strict `%d/%m/%Y %H:%M:%S`, tz-aware UTC; unparseable → reject `bad_timestamp` |
 | — | `event_type` | always `network_connection` (describes telemetry, never the Label) |
 | — | `source` | always `cse_cic_ids2018` |

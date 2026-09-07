@@ -37,6 +37,9 @@ models/ueba/*
 *.h5
 *.onnx
 
+# ---- Evaluation output (regenerable, never committed) ----
+evaluation/
+
 # ---- ML / Vector / Graph local state ----
 chroma_db/
 embeddings/
