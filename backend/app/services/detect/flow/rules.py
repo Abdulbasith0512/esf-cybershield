@@ -7,7 +7,7 @@ evidence is bounded head+tail.
 """
 
 import math
-from collections import Counter
+from collections import Counter, deque
 from datetime import datetime, timedelta
 from statistics import median
 
@@ -111,16 +111,26 @@ class RepeatedAttempts:
         window = timedelta(minutes=self.config.brute_window_minutes)
         for key, members in groups.items():
             members.sort(key=lambda t: (t[0].ts, t[0].event_id))
-            start = 0
-            for end in range(len(members)):
-                while members[end][0].ts - members[start][0].ts >= window:
-                    start += 1
-                windowed = members[start:end + 1]
-                qualifying = [(v, r) for v, r in windowed if self._qualifying(v)]
-                if len(qualifying) >= self.config.brute_min_flows:
-                    qualifying.sort(key=lambda t: (t[0].ts, t[0].event_id))
-                    n = len(qualifying)
-                    rows = [r for _, r in qualifying]
+            # Incremental sliding window: each event enters once and leaves
+            # once. `window_all` holds every event in the active window (for
+            # expiry and window_count); `window_qual` holds only qualifying
+            # ones in (ts, event_id) order. Firing clears both, matching the
+            # reference start=end+1 reset exactly.
+            window_all: deque[tuple[datetime, str, bool]] = deque()
+            window_qual: deque[tuple[datetime, str, dict]] = deque()
+            for v, r in members:
+                ts = v.ts
+                while window_all and ts - window_all[0][0] >= window:
+                    _, _, was_qual = window_all.popleft()
+                    if was_qual:
+                        window_qual.popleft()
+                qualifies = self._qualifying(v)
+                window_all.append((ts, v.event_id, qualifies))
+                if qualifies:
+                    window_qual.append((ts, v.event_id, r))
+                if len(window_qual) >= self.config.brute_min_flows:
+                    n = len(window_qual)
+                    rows = [row for _, _, row in window_qual]
                     out.append(make_result(
                         self.rule_id, self.name, self.severity,
                         min(0.60 + 0.02 * n, 0.9),
@@ -128,8 +138,9 @@ class RepeatedAttempts:
                          f"flows to {key} within 5 minutes."),
                         _bounded(rows),
                         {"key": key, "qualifying_count": n,
-                         "window_count": len(windowed)}))
-                    start = end + 1  # non-overlapping windows, no dupes
+                         "window_count": len(window_all)}))
+                    window_all.clear()
+                    window_qual.clear()
         return out
 
 
