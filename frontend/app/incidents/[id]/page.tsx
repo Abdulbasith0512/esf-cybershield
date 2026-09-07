@@ -5,6 +5,8 @@ import { use, useState } from "react";
 import { ApiError, getIncident } from "@/lib/api-client";
 import { useApi } from "@/lib/use-api";
 import { useIncidentEvidence } from "@/lib/use-incident-evidence";
+import { useIncidentDetections } from "@/lib/use-incident-detections";
+import { DetectionCards } from "@/components/incidents/detection-cards";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SeverityBadge } from "@/components/ui/badge";
@@ -16,7 +18,6 @@ import { RiskBreakdownView } from "@/components/incidents/risk-breakdown";
 import { UebaObservations } from "@/components/incidents/ueba-observations";
 import { IncidentContext } from "@/components/incidents/incident-context";
 import { AttackStory } from "@/components/incidents/attack-story";
-import type { IncidentDetail } from "@/lib/types";
 
 function CopyableId({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -49,51 +50,6 @@ function formatDuration(firstSeen: string, lastSeen: string): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
-function DetectionsByRule({ incident }: { incident: IncidentDetail }) {
-  const byRule = new Map<string, string[]>();
-  for (const m of incident.mitre_techniques) {
-    const list = byRule.get(m.source_rule_id) ?? [];
-    list.push(`${m.technique_id} ${m.technique_name}`);
-    byRule.set(m.source_rule_id, list);
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {incident.detection_ids.length === 0 ? (
-        <EmptyState message="No detections attached to this incident." />
-      ) : (
-        <>
-          <ul className="flex flex-col gap-1 font-mono text-xs">
-            {incident.detection_ids.map((d) => (
-              <li key={d} className="break-all text-soc-text">
-                {d}
-              </li>
-            ))}
-          </ul>
-          {byRule.size > 0 && (
-            <div>
-              <h3 className="mb-1 text-xs uppercase tracking-wide text-soc-muted">
-                Grouped by MITRE source rule
-              </h3>
-              <ul className="flex flex-col gap-1 text-xs">
-                {[...byRule.entries()].map(([rule, techniques]) => (
-                  <li key={rule} className="font-mono text-soc-text">
-                    {rule} → {techniques.join(", ")}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <p className="text-xs text-soc-muted">
-            Full detection objects (rule names, severities, reasons) are not exposed by the
-            current API; only persisted detection IDs are shown. Techniques above come from
-            the incident&apos;s MITRE mappings.
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
-
 export default function IncidentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   return <IncidentDetailView id={id} />;
@@ -104,6 +60,8 @@ export function IncidentDetailView({ id }: { id: string }) {
     getIncident(decodeURIComponent(id), signal),
   );
   const evidence = useIncidentEvidence(data ? data.evidence_event_ids : null);
+  const detections = useIncidentDetections(data ? data.detection_ids : null);
+  const [focusIds, setFocusIds] = useState<string[] | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -190,7 +148,15 @@ export function IncidentDetailView({ id }: { id: string }) {
           </Card>
 
           <Card title={`Detection evidence (${data.detection_ids.length})`}>
-            <DetectionsByRule incident={data} />
+            {detections.loading ? (
+              <LoadingState message="Loading detection details..." />
+            ) : (
+              <DetectionCards
+                items={detections.items}
+                failed={detections.failed}
+                onFocusEvidence={setFocusIds}
+              />
+            )}
           </Card>
 
           <Card title={`MITRE ATT&CK hypotheses (${data.mitre_techniques.length})`}>
@@ -227,7 +193,18 @@ export function IncidentDetailView({ id }: { id: string }) {
             ) : evidence.failed.length > 0 && evidence.items.length === 0 ? (
               <ErrorState message="Unable to load incident evidence." />
             ) : (
-              <EvidenceSection items={evidence.items} failed={evidence.failed} />
+              <>
+                {focusIds !== null && (
+                  <p className="mb-2 text-xs text-soc-accent" role="status">
+                    Highlighting {focusIds.length} event{focusIds.length === 1 ? "" : "s"} from the
+                    selected detection.{" "}
+                    <button type="button" onClick={() => setFocusIds(null)} className="underline">
+                      Clear
+                    </button>
+                  </p>
+                )}
+                <EvidenceSection items={evidence.items} failed={evidence.failed} highlightIds={focusIds} />
+              </>
             )}
           </Card>
 

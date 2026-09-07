@@ -145,3 +145,39 @@ export interface IncidentFilters {
   start_time?: string;
   end_time?: string;
 }
+
+export interface DetectionSummary {
+  detection_id: string;
+  rule_id: string;
+  rule_name: string;
+  severity: string;
+  confidence: number;
+  first_seen: string;
+  last_seen: string;
+  reason: string;
+}
+
+export interface DetectionDetail extends DetectionSummary {
+  evidence_event_ids: string[];
+  detection_metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DetectionListResponse {
+  items: DetectionSummary[];
+  page: number;
+  page_size: number;
+  total: number;
+  pages: number;
+}
+
+export interface DetectionFilters {
+  page?: number;
+  page_size?: number;
+  rule_id?: string;
+  severity?: string;
+  min_confidence?: number;
+  start_time?: string;
+  end_time?: string;
+}

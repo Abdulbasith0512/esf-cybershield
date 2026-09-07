@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from app.api.v1 import events, health, incidents
+from app.api.v1 import detections, events, health, incidents
 from app.core.config import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(events.router)
     app.include_router(incidents.router)
+    app.include_router(detections.router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(

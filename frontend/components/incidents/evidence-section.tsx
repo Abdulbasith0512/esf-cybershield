@@ -13,11 +13,15 @@ import type { EvidenceFailure } from "@/lib/use-incident-evidence";
 export function EvidenceSection({
   items,
   failed,
+  highlightIds = null,
 }: {
   items: SecurityEvent[];
   failed: EvidenceFailure[];
+  highlightIds?: string[] | null;
 }) {
   const [selected, setSelected] = useState<SecurityEvent | null>(null);
+  const highlight = highlightIds === null ? null : new Set(highlightIds);
+  const visible = highlight === null ? items : items.filter((e) => highlight.has(e.event_id));
 
   return (
     <div className="flex flex-col gap-4">
@@ -37,9 +41,11 @@ export function EvidenceSection({
       )}
       {items.length === 0 ? (
         <EmptyState message="No evidence events associated with this incident." />
+      ) : visible.length === 0 ? (
+        <EmptyState message="No evidence events match the selected detection filter." />
       ) : (
         <>
-          <EventsTable events={items} onSelect={setSelected} selectedId={selected?.id ?? null} />
+          <EventsTable events={visible} onSelect={setSelected} selectedId={selected?.id ?? null} />
           {selected && (
             <Card title={`Event detail — ${selected.event_id}`}>
               <EventDetail event={selected} />

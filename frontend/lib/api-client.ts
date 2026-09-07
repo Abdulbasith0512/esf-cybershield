@@ -3,6 +3,9 @@
  */
 
 import type {
+  DetectionDetail,
+  DetectionFilters,
+  DetectionListResponse,
   EventFilters,
   EventListResponse,
   HealthResponse,
@@ -94,4 +97,19 @@ export function listIncidents(filters: IncidentFilters = {}, signal?: AbortSigna
 
 export function getIncident(incidentId: string, signal?: AbortSignal): Promise<IncidentDetail> {
   return request<IncidentDetail>(`/api/v1/incidents/${encodeURIComponent(incidentId)}`, { signal });
+}
+
+export function listDetections(filters: DetectionFilters = {}, signal?: AbortSignal): Promise<DetectionListResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  const query = params.toString();
+  return request<DetectionListResponse>(`/api/v1/detections${query ? `?${query}` : ""}`, { signal });
+}
+
+export function getDetection(detectionId: string, signal?: AbortSignal): Promise<DetectionDetail> {
+  return request<DetectionDetail>(`/api/v1/detections/${encodeURIComponent(detectionId)}`, { signal });
 }
