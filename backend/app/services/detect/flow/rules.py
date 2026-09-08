@@ -244,7 +244,12 @@ class PortScan:
 
 
 class ByteRateAnomaly:
-    """FLOW-004 Flow Byte-Rate Anomaly (MEDIUM). Rate vs rolling baseline."""
+    """FLOW-004 Flow Byte-Rate Anomaly (MEDIUM). Rate vs rolling baseline.
+
+    The bucket signal is the median per-flow byte rate over buckets holding
+    at least byte_min_bucket_flows flows, so one huge legitimate transfer
+    cannot trip the rule; the trailing-median baseline test is unchanged.
+    """
 
     rule_id = "FLOW-004"
     name = "Flow Byte-Rate Anomaly"
@@ -272,18 +277,20 @@ class ByteRateAnomaly:
             peaks = {i: max(v.flow_value("Flow Byts/s") for v, _ in b)
                      for i, b in buckets.items()}
             for i in sorted(buckets):
+                if len(buckets[i]) < self.config.byte_min_bucket_flows:
+                    continue
+                signal = median(v.flow_value("Flow Byts/s") for v, _ in buckets[i])
                 prior = [peaks[j] for j in range(max(0, i - span_buckets), i) if j in peaks]
                 if len(prior) < hist:
                     continue
                 baseline = median(prior)
-                peak = peaks[i]
                 floor = self.config.byte_floor
                 if baseline <= 0:
-                    fires = peak >= floor and peak >= self.config.byte_ratio * floor
-                    ratio = peak / floor if floor else 0
+                    fires = signal >= floor and signal >= self.config.byte_ratio * floor
+                    ratio = signal / floor if floor else 0
                 else:
-                    fires = peak >= self.config.byte_ratio * baseline and peak >= floor
-                    ratio = peak / baseline
+                    fires = signal >= self.config.byte_ratio * baseline and signal >= floor
+                    ratio = signal / baseline
                 if fires:
                     ranked = sorted(buckets[i],
                                     key=lambda t: (-t[0].flow_value("Flow Byts/s"),
@@ -295,10 +302,10 @@ class ByteRateAnomaly:
                     out.append(make_result(
                         self.rule_id, self.name, self.severity,
                         min(0.55 + 0.1 * math.log2(max(ratio, 1.0)), 0.85),
-                        (f"Anomalous flow byte rate detected: peak {peak:,.0f} B/s "
+                        (f"Anomalous flow byte rate detected: median {signal:,.0f} B/s "
                          f"vs {baseline:,.0f} B/s recent median."),
                         rows,
-                        {"key": key, "peak_byts": peak,
+                        {"key": key, "median_byts": signal,
                          "baseline_median": baseline, "ratio": round(ratio, 2)},
                         bucket=bucket_rows))
         return out

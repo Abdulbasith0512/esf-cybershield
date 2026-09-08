@@ -119,10 +119,11 @@ def _baseline_traffic(start_sec, count, byts=20000):
 
 def test_flow004_fires():
     evts = _baseline_traffic(0, 12)  # 6 buckets of history
-    evts += [flow(seconds=600 + i * 10, byts=50_000_000) for i in range(3)]
+    evts += [flow(seconds=600 + i * 10, byts=50_000_000) for i in range(6)]
     dets = run("FLOW-004", evts)
     assert len(dets) == 1
     assert len(dets[0].evidence_event_ids) == 3
+    assert dets[0].metadata["median_byts"] == 50_000_000
 
 
 def test_flow004_below_threshold():
@@ -131,6 +132,48 @@ def test_flow004_below_threshold():
 
 def test_flow004_needs_history():
     assert run("FLOW-004", [flow(seconds=i * 10, byts=50_000_000) for i in range(3)]) == []
+
+
+def test_flow004_single_transfer_silent():
+    # One huge transfer in an otherwise qualified window: below the minimum
+    # bucket population, so no detection even with full history behind it.
+    evts = _baseline_traffic(0, 12)
+    evts += [flow(seconds=600, byts=50_000_000)]
+    assert run("FLOW-004", evts) == []
+
+
+def test_flow004_minimum_population_boundary():
+    base = _baseline_traffic(0, 12)
+    assert len(run("FLOW-004",
+                   base + [flow(seconds=600 + i * 10, byts=50_000_000)
+                           for i in range(5)])) == 1
+    assert run("FLOW-004",
+               base + [flow(seconds=600 + i * 10, byts=50_000_000)
+                       for i in range(4)]) == []
+
+
+def test_flow004_median_not_max():
+    # One 50M transfer among six 1k trickles: max would fire, median stays low.
+    evts = _baseline_traffic(0, 12)
+    evts.append(flow(seconds=600, byts=50_000_000))
+    evts += [flow(seconds=605 + i * 5, byts=1000) for i in range(6)]
+    assert run("FLOW-004", evts) == []
+
+
+def test_flow004_sustained_high_rate_fires():
+    evts = _baseline_traffic(0, 12)
+    evts += [flow(seconds=600 + i * 8, byts=50_000_000) for i in range(8)]
+    (d,) = run("FLOW-004", evts)
+    assert len(d.bucket_event_ids) == 8 and len(d.evidence_event_ids) == 3
+    assert d.metadata["median_byts"] == 50_000_000
+    assert "peak_byts" not in d.metadata
+
+
+def test_flow004_fingerprint_deterministic():
+    evts = _baseline_traffic(0, 12)
+    evts += [flow(seconds=600 + i * 10, byts=50_000_000) for i in range(6)]
+    first = [(d.fingerprint, d.model_dump(mode="json")) for d in run("FLOW-004", evts)]
+    assert [(d.fingerprint, d.model_dump(mode="json")) for d in run("FLOW-004", evts)] == first
 
 
 # ---------------- FLOW-005 ----------------

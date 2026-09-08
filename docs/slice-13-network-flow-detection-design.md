@@ -107,13 +107,21 @@ folds into DATA-001-adjacent context instead of standing alone.
 - **Fields:** `Flow Byts/s`, `destination_ip` (or global), `TotLen Fwd Pkts`,
   `TotLen Bwd Pkts`.
 - **Key:** `destination_ip` or GLOBAL.
-- **Window:** 60 s observation vs trailing 30-min rolling median/MAD.
-- **Threshold:** window max `Flow Byts/s` ≥ 8 × rolling median with minimum
-  1 MB/s floor; minimum evidence 3 flows.
+- **Window:** 60 s observation vs trailing 30-min rolling median.
+- **Threshold:** bucket median `Flow Byts/s` (over buckets with ≥ 5 flows,
+  `byte_min_bucket_flows`) ≥ 8 × rolling median with minimum 1 MB/s floor;
+  minimum evidence 3 flows. Rationale for 5: the engine already requires 5
+  observations for a trustworthy median (`byte_min_history_buckets`,
+  `novelty_min_flows`); single transfers can never trip the rule. Slice-20
+  1M analysis showed max-of-bucket fired on lone benign bulk transfers while
+  the LOIC attack (sub-MB/s flows) never qualified — median fixes the
+  single-transfer trigger without moving the ratio, floor, windows, or
+  history depth.
 - **Severity:** MEDIUM. **Confidence:** scales with log-distance from median,
   capped at 0.85.
-- **Evidence:** top-3 flows by byte rate plus baseline summary in metadata.
-- **Reason:** `"Anomalous flow byte rate detected: peak {x} B/s vs {m} B/s recent median."`
+- **Evidence:** top-3 flows by byte rate plus baseline summary in metadata
+  (`median_byts`, `baseline_median`, `ratio`).
+- **Reason:** `"Anomalous flow byte rate detected: median {x} B/s vs {m} B/s recent median."`
 - **Coverage:** flow-only capable.
 - **False positives:** legitimate bulk transfers, backups, video.
 - **SOC value:** rate counterpart to DATA-001's volume view.

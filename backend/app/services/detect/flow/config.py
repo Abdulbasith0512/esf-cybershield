@@ -28,6 +28,13 @@ class FlowConfig:
     byte_min_history_buckets: int = 5
     byte_ratio: float = 8.0
     byte_floor: float = 1_000_000.0
+    # Minimum flows in a 60-second bucket before its throughput statistic is
+    # evaluated. Rationale: the engine already requires 5 observations for a
+    # trustworthy median (byte_min_history_buckets, novelty_min_flows); a
+    # bucket median computed over fewer flows would be held to a lower
+    # standard than the baseline it is compared against. Single transfers can
+    # therefore never trip the rule, no matter how large.
+    byte_min_bucket_flows: int = 5
     # FLOW-005
     novelty_min_flows: int = 5
     # A novel pair must also carry meaningful minute-level volume: peak flows
