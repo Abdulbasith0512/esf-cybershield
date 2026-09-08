@@ -20,6 +20,7 @@ class DetectionResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
     evidence_event_ids: list[str] = Field(min_length=1)
+    bucket_event_ids: list[str] = Field(default_factory=list)
     first_seen: datetime
     last_seen: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -39,15 +40,18 @@ def detection_id_for(rule_id: str, evidence_ids: list[str]) -> str:
 
 
 def make_result(rule_id: str, rule_name: str, severity: Severity,
-                confidence: float, reason: str, evidence: list[dict],
-                metadata: dict | None = None) -> DetectionResult:
+                 confidence: float, reason: str, evidence: list[dict],
+                 metadata: dict | None = None,
+                 bucket: list[dict] | None = None) -> DetectionResult:
     ids = sorted(e["event_id"] for e in evidence)
     stamps = sorted(e["_ts"] for e in evidence)
+    bucket_ids = sorted({e["event_id"] for e in bucket} if bucket is not None else [])
     return DetectionResult(
         detection_id=detection_id_for(rule_id, ids),
         rule_id=rule_id, rule_name=rule_name, severity=severity,
         confidence=round(max(0.0, min(1.0, confidence)), 3),
         reason=reason, evidence_event_ids=ids,
+        bucket_event_ids=bucket_ids,
         first_seen=stamps[0], last_seen=stamps[-1],
         metadata=metadata or {},
     )

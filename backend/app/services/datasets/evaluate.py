@@ -385,6 +385,7 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
     Replicates ProtocolPortNovelty semantics without holding all events:
     pass 0 finds the time span, pass 1 builds the first-third catalog and
     buffers (count + earliest-5, by timestamp then event_id) per novel pair.
+    Bucket membership is retained as compact (moment, event_id) pairs only.
     Detections are built with make_result using the rule's own identity,
     confidence, reason template, and metadata keys. A cross-validation test
     locks equivalence with rule.evaluate on fixture data.
@@ -416,6 +417,7 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
     catalog: set[tuple] = set()
     counts: dict[tuple, int] = {}
     earliest: dict[tuple, list] = {}
+    bucket_ids: dict[tuple, list] = {}
     overflow = False
     for n, raw in adapter.iter_rows(path, limit=limit):
         result = adapter.normalize_row(raw, source_file=source_file, source_row=n)
@@ -433,6 +435,7 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
         if pair in catalog:
             continue
         counts[pair] = counts.get(pair, 0) + 1
+        bucket_ids.setdefault(pair, []).append((moment, event["event_id"]))
         buf = earliest.setdefault(pair, [])
         if len(buf) < 5 or moment < buf[-1][0]:
             buf.append((moment, event["event_id"], event))
@@ -451,13 +454,15 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
         proto, port = pair
         members = sorted(earliest[pair], key=lambda t: (t[0], t[1]))
         rows = [event for _, _, event in members[:5]]
+        bucket = [{"event_id": eid} for _, eid in sorted(bucket_ids[pair])]
         out.append(make_result(
             rule.rule_id, rule.name, rule.severity, 0.5,
             (f"Unusual protocol/port combination observed: {proto}/{port} "
              f"({counts[pair]} flows), unseen in baseline period."),
             rows,
             {"protocol": proto, "destination_port": port,
-             "count": counts[pair]}))
+             "count": counts[pair]},
+            bucket=bucket))
     out.sort(key=lambda d: d.fingerprint)
     return out, info
 

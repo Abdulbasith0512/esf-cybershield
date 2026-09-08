@@ -78,7 +78,8 @@ class HighConnectionRate:
                          f"within 60 seconds (baseline median {baseline})."),
                         _bounded(rows),
                         {"key": key, "count": n, "baseline_median": baseline,
-                         "threshold": threshold}))
+                         "threshold": threshold},
+                        bucket=rows))
         return out
 
 
@@ -138,7 +139,8 @@ class RepeatedAttempts:
                          f"flows to {key} within 5 minutes."),
                         _bounded(rows),
                         {"key": key, "qualifying_count": n,
-                         "window_count": len(window_all)}))
+                         "window_count": len(window_all)},
+                        bucket=rows))
                     window_all.clear()
                     window_qual.clear()
         return out
@@ -184,13 +186,17 @@ class PortScan:
                     chosen = [by_port[p] for p in sorted(by_port)[:20]]
                     chosen.sort(key=lambda t: (t[0].ts, t[0].event_id))
                     rows = [r for _, r in chosen]
+                    # Full distinct-port set; evidence above keeps the first 20.
+                    bucket_rows = [r for _, r in sorted(
+                        by_port.values(), key=lambda t: (t[0].ts, t[0].event_id))]
                     out.append(make_result(
                         self.rule_id, self.name, self.severity,
                         min(0.55 + 0.02 * len(by_port), 0.85),
                         (f"Port-scan-like behavior detected: {len(by_port)} distinct "
                          f"destination ports contacted from {ip} within 5 minutes."),
                         rows,
-                        {"source_ip": ip, "distinct_ports": len(by_port)}))
+                        {"source_ip": ip, "distinct_ports": len(by_port)},
+                        bucket=bucket_rows))
                     start = end + 1
         return out
 
@@ -217,6 +223,7 @@ class PortScan:
             entropy = -sum((c / total) * math.log2(c / total) for c in counts.values())
             if entropy >= self.config.scan_entropy_threshold:
                 rows = [r for _, r in sorted(bucket, key=lambda t: (t[0].ts, t[0].event_id))[:20]]
+                full_rows = [r for _, r in sorted(bucket, key=lambda t: (t[0].ts, t[0].event_id))]
                 out.append(make_result(
                     self.rule_id, "Port Entropy Anomaly", self.severity,
                     min(0.5 + 0.05 * entropy, 0.8),
@@ -225,7 +232,8 @@ class PortScan:
                      f"This is not attributed to any source."),
                     rows,
                     {"entropy_bits": round(entropy, 3), "flow_count": len(bucket),
-                     "mode": "global-fallback"}))
+                     "mode": "global-fallback"},
+                    bucket=full_rows))
         return out
 
 
@@ -275,6 +283,9 @@ class ByteRateAnomaly:
                                     key=lambda t: (-t[0].flow_value("Flow Byts/s"),
                                                    t[0].event_id))
                     rows = [r for _, r in ranked[:3]]
+                    # Evidence is rate-ranked; bucket keeps full time order.
+                    bucket_rows = [r for _, r in sorted(
+                        buckets[i], key=lambda t: (t[0].ts, t[0].event_id))]
                     out.append(make_result(
                         self.rule_id, self.name, self.severity,
                         min(0.55 + 0.1 * math.log2(max(ratio, 1.0)), 0.85),
@@ -282,7 +293,8 @@ class ByteRateAnomaly:
                          f"vs {baseline:,.0f} B/s recent median."),
                         rows,
                         {"key": key, "peak_byts": peak,
-                         "baseline_median": baseline, "ratio": round(ratio, 2)}))
+                         "baseline_median": baseline, "ratio": round(ratio, 2)},
+                        bucket=bucket_rows))
         return out
 
 
@@ -324,7 +336,8 @@ class ProtocolPortNovelty:
                  f"({len(members)} flows), unseen in baseline period."),
                 rows,
                 {"protocol": proto, "destination_port": port,
-                 "count": len(members)}))
+                 "count": len(members)},
+                bucket=[r for _, r in members]))
         return out
 
 
@@ -375,6 +388,9 @@ class VolumeBurst:
                                                        -self._packets(t[0]),
                                                        t[0].event_id))
                 rows = [r for _, r in ranked[:20]]
+                # Evidence is rate-ranked; bucket keeps full time order.
+                bucket_rows = [r for _, r in sorted(
+                    bucket, key=lambda t: (t[0].ts, t[0].event_id))]
                 out.append(make_result(
                     self.rule_id, self.name, self.severity,
                     min(0.65 + 0.05 * math.log10(aggregate / self.config.burst_min_pps), 0.9),
@@ -382,5 +398,6 @@ class VolumeBurst:
                      f"flows, {aggregate:,.0f} packets/s within 30 seconds."),
                     rows,
                     {"key": key, "flow_count": len(bucket),
-                     "packets_per_s": round(aggregate, 1)}))
+                     "packets_per_s": round(aggregate, 1)},
+                    bucket=bucket_rows))
         return out

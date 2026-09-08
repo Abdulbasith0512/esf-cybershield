@@ -204,6 +204,19 @@ columns. Canonical-vs-flow access is mediated by a typed `FlowView`
   never the whole window.
 - Empty evidence is impossible by construction (minimum-evidence floors).
 
+## 7b. Evidence Sample vs Bucket Membership
+
+- `evidence_event_ids`: capped analyst-facing sample (§7 caps: 20/20/20/3/5/20
+  for FLOW-001..006). Determines `fingerprint` and `detection_id`.
+- `bucket_event_ids`: complete label-free set of event IDs that satisfied the
+  rule's firing condition (full window/bucket/window-qualifying members).
+  Sorted, unique, deterministic; never read from labels.
+- The two have different purposes: evidence identifies a detection for
+  analysts; bucket membership lets downstream evaluation measure whether a
+  detection intersected attack activity without penalizing capped samples.
+- Fingerprint, evidence caps, thresholds, and semantics are unchanged by
+  exposing the bucket set.
+
 ## 8. Severity and Confidence
 
 - Severity is fixed per rule (FLOW-001/003/004/005: MEDIUM or LOW;
