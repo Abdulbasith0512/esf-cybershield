@@ -30,6 +30,15 @@ class FlowConfig:
     byte_floor: float = 1_000_000.0
     # FLOW-005
     novelty_min_flows: int = 5
+    # A novel pair must also carry meaningful minute-level volume: peak flows
+    # in its busiest UTC minute bucket. Same 60-second volume floor the engine
+    # treats as analyst-meaningful for rate anomalies; transient churn never
+    # reaches it, so routine ephemeral-port novelty stays silent.
+    novelty_min_peak: int = 50
+    # IANA dynamic/private range, used only to flag ephemeral-destination
+    # pairs in metadata (no behavioral effect in v1).
+    ephemeral_port_min: int = 49152
+    ephemeral_port_max: int = 65535
     # FLOW-006
     burst_window_seconds: int = 30
     burst_min_flows: int = 500

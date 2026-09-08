@@ -229,9 +229,9 @@ def test_flow005_streaming_matches_rule():
                                  "Flow Duration": "100", "Tot Fwd Pkts": "2",
                                  "Tot Bwd Pkts": "2", "TotLen Fwd Pkts": "200",
                                  "TotLen Bwd Pkts": "100", "Label": "Benign"})
-            for i in range(6):
+            for i in range(60):
                 writer.writerow({"Dst Port": "4443", "Protocol": "17",
-                                 "Timestamp": f"14/02/2018 08:05:{i:02d}",
+                                 "Timestamp": f"14/02/2018 08:05:{i % 60:02d}",
                                  "Flow Duration": "100", "Tot Fwd Pkts": "2",
                                  "Tot Bwd Pkts": "2", "TotLen Fwd Pkts": "200",
                                  "TotLen Bwd Pkts": "100", "Label": "Benign"})

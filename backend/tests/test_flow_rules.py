@@ -137,12 +137,78 @@ def test_flow004_needs_history():
 
 def test_flow005_fires():
     evts = [flow(seconds=i * 60) for i in range(30)]
-    evts += [flow(seconds=7200 + i * 60, proto="UDP", dport=4443) for i in range(6)]
+    evts += [flow(seconds=7200 + i, proto="UDP", dport=4443) for i in range(60)]
     dets = run("FLOW-005", evts)
     assert len(dets) == 1
     d = dets[0]
     assert d.severity == "LOW" and d.confidence == 0.5
     assert len(d.evidence_event_ids) == 5
+    assert d.metadata["peak_minute_count"] == 60
+
+
+def test_flow005_sparse_novelty_silent():
+    # Novel but sparse (one flow per minute): novelty alone never fires.
+    evts = [flow(seconds=i * 60) for i in range(30)]
+    evts += [flow(seconds=7200 + i * 60, proto="UDP", dport=4443) for i in range(6)]
+    assert run("FLOW-005", evts) == []
+
+
+def test_flow005_ephemeral_trivial_silent():
+    evts = [flow(seconds=i * 60) for i in range(30)]
+    evts += [flow(seconds=7200 + i * 60, proto="TCP", dport=50000) for i in range(6)]
+    assert run("FLOW-005", evts) == []
+
+
+def test_flow005_ephemeral_dense_fires():
+    evts = [flow(seconds=i * 60) for i in range(30)]
+    evts += [flow(seconds=7200 + i, proto="TCP", dport=50000) for i in range(60)]
+    (d,) = run("FLOW-005", evts)
+    assert d.metadata["ephemeral_port"] is True
+    assert d.metadata["peak_minute_count"] == 60
+    assert len(d.bucket_event_ids) == 60 and len(d.evidence_event_ids) == 5
+
+
+def test_flow005_known_service_dense_fires():
+    evts = [flow(seconds=i * 60) for i in range(30)]
+    evts += [flow(seconds=7200 + i, proto="TCP", dport=8443) for i in range(60)]
+    (d,) = run("FLOW-005", evts)
+    assert d.metadata["ephemeral_port"] is False
+    assert (d.metadata["protocol"], d.metadata["destination_port"]) == ("TCP", 8443)
+
+
+def test_flow005_known_pair_dense_silent():
+    evts = [flow(seconds=i * 60) for i in range(30)]
+    evts += [flow(seconds=7200 + i) for i in range(60)]  # known TCP/443
+    assert run("FLOW-005", evts) == []
+
+
+def test_flow005_peak_boundary():
+    base = [flow(seconds=i * 60) for i in range(30)]
+    assert len(run("FLOW-005", base + [flow(seconds=7200 + i, proto="UDP", dport=4443)
+                                       for i in range(50)])) == 1
+    assert run("FLOW-005", base + [flow(seconds=7200 + i, proto="UDP", dport=4444)
+                                   for i in range(49)]) == []
+
+
+def test_flow005_order_independent():
+    import random  # noqa: E402
+
+    evts = [flow(seconds=i * 60) for i in range(30)]
+    evts += [flow(seconds=7200 + i, proto="UDP", dport=4443) for i in range(60)]
+    first = [d.model_dump(mode="json") for d in run("FLOW-005", evts)]
+    rng = random.Random(18)
+    shuffled = list(evts)
+    rng.shuffle(shuffled)
+    assert [d.model_dump(mode="json") for d in run("FLOW-005", shuffled)] == first
+
+
+def test_flow005_no_label_params():
+    import inspect  # noqa: E402
+
+    from app.services.detect.flow.rules import ProtocolPortNovelty  # noqa: E402
+
+    params = inspect.signature(ProtocolPortNovelty.evaluate).parameters
+    assert not [p for p in params if "label" in p]
 
 
 def test_flow005_known_pair_silent():
@@ -231,10 +297,10 @@ def test_bucket_004_exceeds_cap3():
 
 def test_bucket_005_exceeds_cap5():
     evts = [flow(seconds=i * 60) for i in range(30)]
-    evts += [flow(seconds=7200 + i * 60, proto="UDP", dport=4443) for i in range(6)]
+    evts += [flow(seconds=7200 + i, proto="UDP", dport=4443) for i in range(60)]
     (d,) = run("FLOW-005", evts)
     assert len(d.evidence_event_ids) == 5
-    assert len(d.bucket_event_ids) == 6
+    assert len(d.bucket_event_ids) == 60
 
 
 def test_bucket_006_full():

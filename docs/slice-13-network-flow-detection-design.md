@@ -126,13 +126,31 @@ folds into DATA-001-adjacent context instead of standing alone.
 - **Window:** session-scoped (whole input): build catalog of
   (protocol, port) pairs in the first temporal third; flag pairs unseen in
   the catalog with ≥ 5 flows in the remainder.
-- **Threshold:** unseen pair + ≥ 5 flows.
+- **Threshold:** unseen pair + ≥ 5 flows + peak ≥ 50 flows within one UTC
+  minute bucket (`novelty_min_peak`). Rationale: Slice-17 1M analysis showed
+  novelty alone fires on routine ephemeral-port churn (1612 FP, most pairs
+  seen ≤ ~11 times spread thin); the peak gate reuses the engine's existing
+  60-second meaningful-volume floor (`rate_min_count`), so transient churn
+  stays silent while sustained novel services still fire. IANA ephemeral
+  range (49152–65535, configurable) is reported in metadata for analyst
+  context; it does not change firing in v1.
 - **Severity:** LOW. **Confidence:** fixed 0.5 (weakest signal by design).
-- **Evidence:** up to 5 earliest unseen-pair flows.
+- **Evidence:** up to 5 earliest unseen-pair flows. **Bucket:** all pair
+  members. Metadata adds `peak_minute_count` and `ephemeral_port`.
 - **Reason:** `"Unusual protocol/port combination observed: {proto}/{port} ({n} flows), unseen in baseline period."`
 - **Coverage:** flow-only capable.
-- **False positives:** new legitimate services, ephemeral ports.
+- **False positives:** new legitimate services reaching minute-level volume;
+  sparse-but-persistent odd-port background is now silent by design.
 - **SOC value:** low-cost novelty tripwire, not an alert cannon.
+- **Label-free guarantee:** decision uses only timestamps, protocol, and
+  ports; no label/ground-truth access (AST-tested).
+- **Chunk/streaming:** the full second-pass replica implements identical
+  catalog, minute-bucket, and peak semantics over the whole stream
+  (cross-validated byte-for-byte against the rule); chunk-local windows do
+  not apply.
+- **Known limitations:** pairs sustaining moderate volume below the peak
+  floor stay silent; minute buckets are UTC-epoch aligned (boundary effects
+  possible for bursts straddling a minute edge).
 
 ### FLOW-006 — DoS-like High-Volume Burst
 - **Hypothesis:** extreme packet/flow surges in short windows indicate

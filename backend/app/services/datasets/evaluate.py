@@ -9,7 +9,7 @@ import hashlib
 import json
 import random
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -617,7 +617,7 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
     confidence, reason template, and metadata keys. A cross-validation test
     locks equivalence with rule.evaluate on fixture data.
     """
-    from app.services.detect.flow.rules import ProtocolPortNovelty
+    from app.services.detect.flow.rules import ProtocolPortNovelty, _ephemeral_port
     from app.services.detect.models import make_result
 
     rule = ProtocolPortNovelty(config)
@@ -645,6 +645,7 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
     counts: dict[tuple, int] = {}
     earliest: dict[tuple, list] = {}
     bucket_ids: dict[tuple, list] = {}
+    minutes: dict[tuple, Counter] = {}
     overflow = False
     for n, raw in adapter.iter_rows(path, limit=limit):
         result = adapter.normalize_row(raw, source_file=source_file, source_row=n)
@@ -663,6 +664,9 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
             continue
         counts[pair] = counts.get(pair, 0) + 1
         bucket_ids.setdefault(pair, []).append((moment, event["event_id"]))
+        minute = int((moment - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds() // 60)
+        per_min = minutes.setdefault(pair, Counter())
+        per_min[minute] = per_min.get(minute, 0) + 1
         buf = earliest.setdefault(pair, [])
         if len(buf) < 5 or moment < buf[-1][0]:
             buf.append((moment, event["event_id"], event))
@@ -679,6 +683,9 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
         if counts[pair] < threshold:
             continue
         proto, port = pair
+        peak = max(minutes[pair].values())
+        if peak < config.novelty_min_peak:
+            continue
         members = sorted(earliest[pair], key=lambda t: (t[0], t[1]))
         rows = [event for _, _, event in members[:5]]
         bucket = [{"event_id": eid} for _, eid in sorted(bucket_ids[pair])]
@@ -688,7 +695,8 @@ def evaluate_flow005_full(adapter, path: Path, source_file: str, config,
              f"({counts[pair]} flows), unseen in baseline period."),
             rows,
             {"protocol": proto, "destination_port": port,
-             "count": counts[pair]},
+             "count": counts[pair], "peak_minute_count": peak,
+             "ephemeral_port": _ephemeral_port(port, config)},
             bucket=bucket))
     out.sort(key=lambda d: d.fingerprint)
     return out, info

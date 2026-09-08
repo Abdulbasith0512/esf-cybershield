@@ -35,6 +35,12 @@ def _entity_key(*parts: str | None) -> str:
     return "|".join(p if p else "?" for p in parts)
 
 
+def _ephemeral_port(port, config: FlowConfig) -> bool:
+    """IANA dynamic/private range check for analyst context (metadata only)."""
+    return (isinstance(port, int) and not isinstance(port, bool)
+            and config.ephemeral_port_min <= port <= config.ephemeral_port_max)
+
+
 class HighConnectionRate:
     """FLOW-001 High Connection Rate (MEDIUM). Volume vs own baseline."""
 
@@ -299,7 +305,12 @@ class ByteRateAnomaly:
 
 
 class ProtocolPortNovelty:
-    """FLOW-005 Protocol/Port Anomaly (LOW). Novelty tripwire, not cannon."""
+    """FLOW-005 Protocol/Port Anomaly (LOW). Novelty tripwire, not cannon.
+
+    Novelty alone never fires: a novel pair must also reach peak minute-level
+    volume (config.novelty_min_peak within one UTC minute bucket), so routine
+    ephemeral-port churn stays silent while sustained novel services fire.
+    """
 
     rule_id = "FLOW-005"
     name = "Protocol/Port Anomaly"
@@ -308,6 +319,11 @@ class ProtocolPortNovelty:
 
     def __init__(self, config: FlowConfig = FlowConfig()):
         self.config = config
+
+    @staticmethod
+    def _minute_bucket(moment: datetime) -> int:
+        epoch = datetime(1970, 1, 1)  # naive-UTC minute buckets, machine-independent
+        return int((moment - epoch).total_seconds() // 60)
 
     def evaluate(self, events: list[dict]) -> list[DetectionResult]:
         pairs = _pairs(events)
@@ -329,6 +345,15 @@ class ProtocolPortNovelty:
             if len(members) < self.config.novelty_min_flows:
                 continue
             members.sort(key=lambda t: (t[0].ts, t[0].event_id))
+            peak = 0
+            if members:
+                per_minute: dict[int, int] = {}
+                for view, _ in members:
+                    minute = self._minute_bucket(view.ts)
+                    per_minute[minute] = per_minute.get(minute, 0) + 1
+                peak = max(per_minute.values())
+            if peak < self.config.novelty_min_peak:
+                continue
             rows = [r for _, r in members[:5]]
             out.append(make_result(
                 self.rule_id, self.name, self.severity, 0.5,
@@ -336,7 +361,8 @@ class ProtocolPortNovelty:
                  f"({len(members)} flows), unseen in baseline period."),
                 rows,
                 {"protocol": proto, "destination_port": port,
-                 "count": len(members)},
+                 "count": len(members), "peak_minute_count": peak,
+                 "ephemeral_port": _ephemeral_port(port, self.config)},
                 bucket=[r for _, r in members]))
         return out
 
