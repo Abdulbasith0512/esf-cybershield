@@ -4,7 +4,7 @@ import logging
 
 from app.services.correlate.config import CorrelatorConfig
 from app.services.correlate.models import Incident
-from app.services.correlate.rules import build_incident, linked, resolve_entities
+from app.services.correlate.rules import build_incident, linked, resolve_entities, resolve_network
 from app.services.detect.common import coerce_ts
 from app.services.detect.models import DetectionResult
 
@@ -27,6 +27,10 @@ def correlate(detections: list[DetectionResult],
     if not dets:
         return []
     ent = resolve_entities(dets, events_by_id)
+    # Precomputed once: network entity keys and bucket membership sets for the
+    # FLOW branch. Same verdicts as inline computation, without O(n^2) rebuilds.
+    net = resolve_network(dets)
+    buckets = {d.detection_id: frozenset(d.bucket_event_ids) for d in dets}
 
     parent = {d.detection_id: d.detection_id for d in dets}
 
@@ -44,7 +48,7 @@ def correlate(detections: list[DetectionResult],
     links: dict[frozenset, dict] = {}
     for i in range(len(dets)):
         for j in range(i + 1, len(dets)):
-            ok, signals = linked(dets[i], dets[j], ent, config)
+            ok, signals = linked(dets[i], dets[j], ent, config, buckets, net)
             if ok:
                 union(dets[i].detection_id, dets[j].detection_id)
                 links.setdefault(frozenset((dets[i].detection_id,

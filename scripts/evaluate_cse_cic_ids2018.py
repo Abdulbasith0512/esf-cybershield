@@ -29,6 +29,9 @@ from app.services.datasets.evaluate import (  # noqa: E402
     chunked_detect,
     collect_evidence_labels,
     coverage_from_labels,
+    detection_record,
+    incident_metrics,
+    incident_record,
     label_by_event,
     label_coverage,
     overall_summary,
@@ -39,7 +42,10 @@ from app.services.datasets.evaluate import (  # noqa: E402
     run_id_for,
     session_rule_sample,
     stratified_sample,
+    write_jsonl,
 )
+from app.services.correlate import correlate  # noqa: E402
+from app.services.correlate.rules import resolve_network  # noqa: E402
 from app.services.detect.flow import detect_flows  # noqa: E402
 from app.services.detect.flow.config import FlowConfig  # noqa: E402
 from app.services.detect.flow.rules import ProtocolPortNovelty  # noqa: E402
@@ -215,6 +221,11 @@ def main() -> None:
     attack_labels = attack_labels_from_totals(label_totals)
     bucket = bucket_metrics(all_dets, labels, attack_labels)
     per_rule_bucket = per_rule_bucket_metrics(all_dets, labels, attack_labels)
+    # Replay pipeline: the application correlation engine runs on the exact
+    # in-memory detections (never re-detected, never labelled beforehand).
+    incidents = correlate(all_dets)
+    det_by_id = {d.detection_id: d for d in all_dets}
+    incident_summary = incident_metrics(incidents, det_by_id, labels, attack_labels)
 
     fp_notes = []
     for det in sorted(all_dets, key=lambda d: d.fingerprint)[:20]:
@@ -228,12 +239,20 @@ def main() -> None:
                              "detections": len(all_dets),
                              "runtime_s": round(time.perf_counter() - started, 1)},
                             per_rule, overall, coverage, fp_notes, True,
-                            bucket=bucket, per_rule_bucket=per_rule_bucket)
+                            bucket=bucket, per_rule_bucket=per_rule_bucket,
+                            incident=incident_summary)
     outdir = Path(args.outdir)
     if not outdir.is_absolute():
         outdir = REPO / outdir
     outdir = outdir / run_id
     outdir.mkdir(parents=True, exist_ok=True)
+    network_keys = resolve_network(all_dets)
+    det_digest = write_jsonl(
+        [detection_record(d, network_keys.get(d.detection_id)) for d in all_dets],
+        outdir / "detections.jsonl")
+    inc_digest = write_jsonl(
+        [incident_record(i, det_by_id) for i in incidents],
+        outdir / "incidents.jsonl")
     (outdir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     (outdir / "report.md").write_text(render_markdown(summary), encoding="utf-8")
     print(render_markdown(summary))

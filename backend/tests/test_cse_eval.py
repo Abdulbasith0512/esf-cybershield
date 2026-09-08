@@ -34,7 +34,7 @@ def labeled(ids, label):
     return {e: ("Benign" if label == "benign" else label) for e in ids}
 
 
-def bdet(rule_id, evidence, bucket, conf=0.8, ts="2026-09-03T09:00:00"):
+def bdet(rule_id, evidence, bucket, conf=0.8, ts="2026-09-03T09:00:00", meta=None):
     """DetectionResult with explicit bucket membership for bucket tests."""
     ids = sorted(evidence)
     return DetectionResult(
@@ -42,7 +42,7 @@ def bdet(rule_id, evidence, bucket, conf=0.8, ts="2026-09-03T09:00:00"):
         rule_name=f"Rule {rule_id}", severity="MEDIUM", confidence=conf,
         reason=f"{rule_id} fired", evidence_event_ids=ids,
         bucket_event_ids=sorted(bucket),
-        first_seen=ts, last_seen=ts, metadata={})
+        first_seen=ts, last_seen=ts, metadata=dict(meta or {}))
 
 
 # A. label normalization
@@ -529,3 +529,114 @@ def test_bucket_posthoc_ordering():
         params = inspect.signature(getattr(ev, fn)).parameters
         assert not [p for p in params if "label" in p], fn
     assert set(inspect.signature(ev.build_attack_episodes).parameters) == {"label_map"}
+
+
+# ---------------- Incident pipeline (Slice 15) ----------------
+
+def _ibucket(dets):
+    return {d.detection_id: d for d in dets}
+
+
+def test_incident_serialization_deterministic(tmp_path=None):
+    import tempfile  # noqa: E402
+
+    from app.services.correlate import correlate  # noqa: E402
+
+    dets = [bdet("FLOW-001", ["e1"], ["e1", "e2"], meta={"key": "10.0.0.1"}),
+            bdet("FLOW-004", ["e3"], ["e3", "e2"], meta={"key": "10.0.0.1"})]
+    incs = correlate(dets)
+    scratch = Path(tempfile.mkdtemp(prefix="esf-eval-inc-"))
+    try:
+        first = ev.write_jsonl([ev.detection_record(d) for d in dets],
+                               scratch / "a.jsonl")
+        second = ev.write_jsonl([ev.detection_record(d) for d in dets],
+                                scratch / "b.jsonl")
+        assert first == second
+        assert (scratch / "a.jsonl").read_bytes() == (scratch / "b.jsonl").read_bytes()
+        by_id = _ibucket(dets)
+        recs = [ev.incident_record(i, by_id) for i in incs]
+        assert ev.write_jsonl(recs, scratch / "c.jsonl") == \
+            ev.write_jsonl([ev.incident_record(i, by_id) for i in correlate(dets)],
+                           scratch / "d.jsonl")
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_incident_replay_uses_real_engine():
+    from app.services.correlate import correlate  # noqa: E402
+
+    dets = [bdet("FLOW-001", ["e1"], ["e1"], meta={"key": "10.0.0.1"}),
+            bdet("FLOW-001", ["e2"], ["e2"], meta={"key": "10.0.0.2"})]
+    incs = correlate(dets)
+    seen = sorted(did for i in incs for did in i.detection_ids)
+    assert seen == sorted(d.detection_id for d in dets)
+    assert len(seen) == len(set(seen))  # complete, disjoint mapping
+
+
+def test_incident_attack_hit_and_recall_once():
+    from app.services.correlate import correlate  # noqa: E402
+
+    meta = {"key": "10.0.0.1"}
+    dets = [bdet("FLOW-001", ["e1"], ["e1", "x1"], meta=meta),
+            bdet("FLOW-001", ["e2"], ["e2", "x1"], meta=meta),
+            bdet("FLOW-004", ["e3"], ["e3", "x1"], meta=meta)]
+    incs = correlate(dets)
+    labels = {"e1": "Benign", "e2": "Benign", "e3": "Benign", "x1": "Attack"}
+    mets = ev.incident_metrics(incs, _ibucket(dets), labels, ["Attack"])
+    assert mets["total_incidents"] == 1  # one multi-detection incident
+    assert mets["attack_incidents"] == 1 and mets["incident_attack_hit"] == 1
+    assert mets["incident_precision"] == 1 and mets["incident_recall"] == 1
+    assert mets["detections_per_incident"] == 3
+
+
+def test_incident_benign_not_hit():
+    from app.services.correlate import correlate  # noqa: E402
+
+    dets = [bdet("FLOW-001", ["e1"], ["e1"], meta={"key": "10.0.0.1"})]
+    incs = correlate(dets)
+    mets = ev.incident_metrics(incs, _ibucket(dets), {"e1": "Benign"}, ["Attack"])
+    assert (mets["attack_incidents"], mets["benign_incidents"]) == (0, 1)
+    assert mets["incident_precision"] == 0 and mets["incident_recall"] == 0
+
+
+def test_incident_buckets_survive_capped_evidence():
+    bucket = [f"b{i:03d}" for i in range(50)]
+    d = bdet("FLOW-001", bucket[:20], bucket, meta={"key": "10.0.0.1"})
+    rec = ev.detection_record(d)
+    assert len(rec["evidence_event_ids"]) == 20 and len(rec["bucket_event_ids"]) == 50
+    assert set(rec["evidence_event_ids"]) <= set(rec["bucket_event_ids"])
+
+
+def test_incident_composition_and_coverage():
+    from app.services.correlate import correlate  # noqa: E402
+
+    dets = [bdet("FLOW-001", ["e1"], ["e1"], meta={"key": "10.0.0.1"}),
+            bdet("FLOW-004", ["e2"], ["e2"], meta={"key": "10.0.0.1"}),
+            bdet("FLOW-001", ["e3"], ["e3"], meta={"key": "10.9.9.9"})]
+    incs = correlate(dets)
+    labels = {"e1": "Attack", "e2": "Benign", "e3": "Benign"}
+    mets = ev.incident_metrics(incs, _ibucket(dets), labels, ["Attack"])
+    # Disjoint buckets with no configured sequence stay separate singletons.
+    assert mets["total_incidents"] == 3
+    assert mets["rule_composition"] == {"FLOW-001": 2, "FLOW-004": 1}
+    assert (mets["attack_incidents"], mets["incident_precision"]) == (1, 1 / 3)
+    assert mets["incidents_with_evidence"] == len(incs)
+    assert mets["incidents_with_buckets"] == len(incs)
+
+
+def test_incident_labels_posthoc_only():
+    from app.services.correlate import correlate  # noqa: E402
+
+    dets = [bdet("FLOW-001", ["e1"], ["e1", "e2"], meta={"key": "10.0.0.1"})]
+    before = [i.model_dump(mode="json") for i in correlate(dets)]
+    # Relabelling after detection must not alter incidents or buckets.
+    assert [i.model_dump(mode="json") for i in correlate(dets)] == before
+    assert dets[0].bucket_event_ids == ["e1", "e2"]
+
+
+def test_incident_empty_and_no_fpr():
+    assert ev.incident_metrics([], {}, {}, [])["incident_precision"] is None
+    assert ev.incident_metrics([], {}, {}, [])["incident_recall"] is None
+    mets = ev.incident_metrics([], {}, {}, ["Attack"])
+    assert mets["incident_precision"] is None and mets["incident_recall"] == 0
+    assert "fpr" not in json.dumps(mets) and "incident_fpr" not in mets

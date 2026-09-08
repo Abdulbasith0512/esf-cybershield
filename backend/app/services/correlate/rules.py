@@ -14,6 +14,7 @@ from app.services.detect.models import DetectionResult
 
 RULE_SEVERITY_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 UNKNOWN = "unknown"
+FLOW_PREFIX = "FLOW-"
 
 
 def _naive(dt) -> datetime:
@@ -76,25 +77,121 @@ def _span(det: DetectionResult):
     return _naive(det.first_seen), _naive(det.last_seen)
 
 
+def _network_key(rule_id: str, meta: dict):
+    """Deterministic network entity from detection metadata (label-free).
+
+    Kinds: ("host", ip) for rate/byte/burst rules grouped by destination;
+    ("service", ip, port|None) for brute-force keyed by destination service;
+    ("scanner", ip) for port-scan sources; ("ppsvc", proto, port) for
+    protocol/port novelty. None when no attributable entity exists (entropy
+    fallback, GLOBAL/unknown keys, missing fields) — None never matches.
+    """
+    if rule_id == "FLOW-003":
+        if meta.get("mode") == "global-fallback":
+            return None
+        sip = meta.get("source_ip")
+        return ("scanner", sip) if sip else None
+    if rule_id == "FLOW-005":
+        proto, port = meta.get("protocol"), meta.get("destination_port")
+        if not proto or port is None:
+            return None
+        return ("ppsvc", str(proto), str(port))
+    if rule_id == "FLOW-002":
+        ip, sep, port = (meta.get("key") or "").partition("|")
+        if not sep or not ip or ip in ("GLOBAL", "?"):
+            return None
+        return ("service", ip, None if port in ("", "?") else port)
+    if rule_id in ("FLOW-001", "FLOW-004", "FLOW-006"):
+        key = meta.get("key")
+        if not key or key in ("GLOBAL", "?"):
+            return None
+        return ("host", key)
+    return None
+
+
+def resolve_network(detections: list[DetectionResult]):
+    """Map detection_id -> network entity key (or None). Metadata-only."""
+    return {d.detection_id: _network_key(d.rule_id, d.metadata or {})
+            for d in detections}
+
+
+def _network_compatible(k1, k2) -> bool:
+    """Entity agreement gate. Exact match, plus service-refines-host: a
+    ("service", ip, port) detection addresses the ("host", ip) entity."""
+    if k1 is None or k2 is None:
+        return False
+    if k1 == k2:
+        return True
+    if k1[0] == "host" and k2[0] == "service" and k1[1] == k2[1]:
+        return True
+    return k2[0] == "host" and k1[0] == "service" and k2[1] == k1[1]
+
+
+def _flow_linked(a: DetectionResult, b: DetectionResult, config: CorrelatorConfig,
+                 buckets, net) -> tuple[bool, dict]:
+    """FLOW-to-FLOW network branch. Returns False for any non-FLOW pair, so
+    existing user+host behavior is unreachable here and stays bit-identical."""
+    if not (a.rule_id.startswith(FLOW_PREFIX) and b.rule_id.startswith(FLOW_PREFIX)):
+        return False, {}
+    ka = (net or {}).get(a.detection_id)
+    if ka is None and net is None:
+        ka = _network_key(a.rule_id, a.metadata or {})
+    kb = (net or {}).get(b.detection_id)
+    if kb is None and net is None:
+        kb = _network_key(b.rule_id, b.metadata or {})
+    if not _network_compatible(ka, kb):
+        # Cross-entity pairs link only through a configured sequence pair
+        # backed by shared bucket flows (e.g. scanner output feeding a
+        # brute-force window); entity agreement alone is never bypassed
+        # without overlap.
+        pair = tuple(sorted((a.rule_id, b.rule_id)))
+        sequenced = pair in {tuple(sorted(p)) for p in config.flow_sequence_pairs}
+        if not sequenced:
+            return False, {}
+    else:
+        pair = tuple(sorted((a.rule_id, b.rule_id)))
+        sequenced = pair in {tuple(sorted(p)) for p in config.flow_sequence_pairs}
+    a0, a1 = _span(a)
+    b0, b1 = _span(b)
+    gap = max(0.0, (max(a0, b0) - min(a1, b1)).total_seconds() / 60.0)
+    if gap > config.network_window_minutes:
+        return False, {}
+    ba = (buckets or {}).get(a.detection_id)
+    if ba is None:
+        ba = frozenset(a.bucket_event_ids)
+    bb = (buckets or {}).get(b.detection_id)
+    if bb is None:
+        bb = frozenset(b.bucket_event_ids)
+    shared = sorted(ba & bb)
+    if not shared and not (sequenced and _network_compatible(ka, kb)):
+        return False, {}
+    return True, {"network_entity": sorted([list(ka), list(kb)]),
+                  "gap_minutes": round(gap, 2),
+                  "shared_bucket": shared,
+                  "shared_bucket_count": len(shared),
+                  "sequenced": sequenced,
+                  "pair": [a.rule_id, b.rule_id]}
+
+
 def linked(a: DetectionResult, b: DetectionResult, ent: dict,
-           config: CorrelatorConfig) -> tuple[bool, dict]:
+           config: CorrelatorConfig, buckets=None, net=None) -> tuple[bool, dict]:
     """Strict link predicate. Returns (linked, signals dict)."""
     ua, ha = ent[a.detection_id]
     ub, hb = ent[b.detection_id]
     if not ua or not ub or ua != ub:
-        return False, {}
+        return _flow_linked(a, b, config, buckets, net)
     if not ha or not hb or ha != hb:
-        return False, {}
+        return _flow_linked(a, b, config, buckets, net)
     a0, a1 = _span(a)
     b0, b1 = _span(b)
     gap = max(0.0, (max(a0, b0) - min(a1, b1)).total_seconds() / 60.0)
     if gap > config.window_minutes:
-        return False, {}
+        return _flow_linked(a, b, config, buckets, net)
     shared = set(a.evidence_event_ids) & set(b.evidence_event_ids)
     pair = tuple(sorted((a.rule_id, b.rule_id)))
     sequenced = pair in {tuple(sorted(p)) for p in config.sequence_pairs}
     if not shared and not sequenced:
-        return False, {}
+        return _flow_linked(a, b, config, buckets, net)
     return True, {"same_user": True, "same_host": True, "gap_minutes": round(gap, 2),
                   "shared_evidence": sorted(shared), "sequenced": sequenced,
                   "pair": [a.rule_id, b.rule_id]}
@@ -111,6 +208,8 @@ def score_group(members: list[DetectionResult], links: list[dict],
         return round(min(base + 0.10 * (d.confidence or 0), 1.0), 3)
     score = config.w_same_user + config.w_same_host + config.w_temporal
     if any(link.get("shared_evidence") for link in links):
+        score += config.w_shared_evidence
+    if any(link.get("shared_bucket") for link in links):
         score += config.w_shared_evidence
     if any(link.get("sequenced") for link in links):
         score += config.w_sequence
@@ -186,6 +285,10 @@ def build_incident(members: list[DetectionResult], user: str | None,
     first = min(_naive(d.first_seen) for d in members)
     last = max(_naive(d.last_seen) for d in members)
     score = score_group(members, links, config)
+    network_entities = [list(k) for k in sorted(
+        {_network_key(d.rule_id, d.metadata or {}) for d in members
+         if _network_key(d.rule_id, d.metadata or {}) is not None},
+        key=repr)]
     return Incident(
         incident_id=incident_id_for(det_ids),
         title=build_title(members),
@@ -199,6 +302,7 @@ def build_incident(members: list[DetectionResult], user: str | None,
         metadata={"rule_ids": sorted({d.rule_id for d in members}),
                   "user": user, "host": host,
                   "correlation_score": score,
+                  "network_entities": network_entities,
                   "sequence_hits": sorted({tuple(sorted((a, b))) for link in links
                                            for a, b in [link.get("pair", ())] if a}),
                   "detection_count": len(members),

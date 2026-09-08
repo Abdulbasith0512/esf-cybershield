@@ -99,6 +99,22 @@ work too. Output: `evaluation/cse_cic_ids2018/<run-id>/{summary.json,report.md}`
 label_coverage, false_positives (first 20, bounded), leakage_check.
 `report.md`: the same, human-readable, with `n/a` for undefined metrics.
 
+## 11b. Detection/incident replay pipeline (Slice 15)
+
+After detection, the application correlation engine (`correlate`) runs on the
+exact in-memory detections — never re-detected, never labelled beforehand.
+Two deterministic JSONL artifacts are written beside the summary:
+`detections.jsonl` (one record per detection: identity, fingerprint, rule,
+span, severity, confidence, metadata, capped evidence, complete bucket IDs,
+resolved network entity) and `incidents.jsonl` (incident fields plus member
+detection IDs and member bucket union). Both are fingerprint-ordered with
+sorted keys, so identical inputs yield byte-identical files. Incident metrics
+(attack-hit incidents, incident precision/recall over the same post-hoc
+episodes, detections-per-incident stats, rule composition) complement
+detection metrics; no incident FPR is reported because benign episodes are
+not a partition. The 1M rerun is intentionally deferred until this pipeline
+is validated on small slices.
+
 ## 12. Limitations
 
 - Flow-only files: no endpoint attribution; AUTH/UEBA-style signals absent.

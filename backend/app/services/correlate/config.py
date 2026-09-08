@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 class CorrelatorConfig:
     # Temporal proximity: detections farther apart never link on time alone.
     window_minutes: int = 30
+    # Network-aware FLOW correlation uses the same default through a separate
+    # knob, so flow tuning never moves AUTH/PROC/NET/DATA behavior.
+    network_window_minutes: int = 30
     # Recognized attack-sequence pairs (unordered). Strong correlation signal.
     sequence_pairs: tuple = field(default_factory=lambda: (
         ("AUTH-001", "PROC-001"), ("AUTH-001", "PROC-002"),
@@ -14,6 +17,11 @@ class CorrelatorConfig:
         ("PROC-002", "NET-001"), ("PROC-001", "DATA-001"),
         ("PROC-002", "DATA-001"), ("NET-001", "DATA-001"),
         ("AUTH-001", "DATA-001"),
+    ))
+    # Justified FLOW sequence relationships (unordered): recon Scanner output
+    # feeding brute-force attempts, and rate anomaly escalating to burst.
+    flow_sequence_pairs: tuple = field(default_factory=lambda: (
+        ("FLOW-003", "FLOW-002"), ("FLOW-001", "FLOW-006"),
     ))
     # Full-chain bonuses (subsets of member rule_ids).
     full_chain_3: frozenset = frozenset({"AUTH-001", "PROC-001", "NET-001"})

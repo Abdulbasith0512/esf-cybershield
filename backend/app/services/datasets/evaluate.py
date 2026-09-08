@@ -268,6 +268,133 @@ def per_rule_bucket_metrics(detections: list, bucket_labels: dict[str, str],
     return out
 
 
+def _iso_stamp(value: Any) -> str:
+    moment = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    return moment
+
+
+def detection_record(det, network_key=None) -> dict:
+    """Deterministic replay record for one DetectionResult. Labels never read."""
+    return {
+        "detection_id": det.detection_id,
+        "fingerprint": det.fingerprint,
+        "rule_id": det.rule_id,
+        "rule_name": det.rule_name,
+        "severity": det.severity,
+        "confidence": det.confidence,
+        "reason": det.reason,
+        "first_seen": _iso_stamp(det.first_seen),
+        "last_seen": _iso_stamp(det.last_seen),
+        "evidence_event_ids": sorted(det.evidence_event_ids),
+        "bucket_event_ids": sorted(set(det.bucket_event_ids)),
+        "network_entity": list(network_key) if network_key is not None else None,
+        "metadata": json.loads(json.dumps(det.metadata or {}, sort_keys=True, default=str)),
+    }
+
+
+def incident_record(incident, det_by_id: dict | None = None) -> dict:
+    """Deterministic replay record for one Incident. Member buckets resolved
+    from caller-provided detections; missing members contribute nothing."""
+    det_by_id = det_by_id or {}
+    bucket_union: set[str] = set()
+    for did in incident.detection_ids:
+        det = det_by_id.get(did)
+        if det is not None:
+            bucket_union.update(det.bucket_event_ids)
+    return {
+        "incident_id": incident.incident_id,
+        "fingerprint": incident.fingerprint,
+        "title": incident.title,
+        "severity": incident.severity,
+        "status": incident.status,
+        "confidence": incident.confidence,
+        "reason": incident.reason,
+        "detection_ids": sorted(incident.detection_ids),
+        "evidence_event_ids": sorted(set(incident.evidence_event_ids)),
+        "bucket_event_ids": sorted(bucket_union),
+        "first_seen": _iso_stamp(incident.first_seen),
+        "last_seen": _iso_stamp(incident.last_seen),
+        "metadata": json.loads(json.dumps(incident.metadata or {}, sort_keys=True, default=str)),
+    }
+
+
+def write_jsonl(records: list[dict], path) -> str:
+    """Write deterministic JSONL (fingerprint order, sorted keys). Returns sha256."""
+    ordered = sorted(records, key=lambda r: r.get("fingerprint", ""))
+    digest = hashlib.sha256()
+    with Path(path).open("w", encoding="utf-8", newline="\n") as handle:
+        for record in ordered:
+            line = json.dumps(record, sort_keys=True, default=str) + "\n"
+            digest.update(line.encode("utf-8"))
+            handle.write(line)
+    return digest.hexdigest()
+
+
+def _median_number(values: list) -> float | None:
+    ordered = sorted(values)
+    count = len(ordered)
+    if count == 0:
+        return None
+    mid = count // 2
+    if count % 2:
+        return float(ordered[mid])
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def incident_metrics(incidents: list, det_by_id: dict,
+                     bucket_labels: dict[str, str], attack_labels) -> dict:
+    """Incident-level post-hoc metrics. Hit = member bucket union (falling back
+    to member evidence only when no member carries bucket IDs) intersects an
+    attack episode. No incident FPR: benign episodes are not a partition, so a
+    conventional false-positive denominator would mislead; it is omitted."""
+    attack_set = set(attack_labels)
+    hit_episodes: set[str] = set()
+    attack_hit = 0
+    with_buckets = 0
+    with_network = 0
+    sizes: list[int] = []
+    compositions: Counter[str] = Counter()
+    for incident in incidents:
+        sizes.append(len(incident.detection_ids))
+        members = [det_by_id[did] for did in incident.detection_ids if did in det_by_id]
+        bucket_union = {eid for det in members for eid in det.bucket_event_ids}
+        if bucket_union:
+            with_buckets += 1
+            pool = bucket_union
+        else:
+            pool = {eid for det in members for eid in det.evidence_event_ids}
+        labels_hit = {bucket_labels[eid] for eid in pool if eid in bucket_labels}
+        attack_hit_labels = {lab for lab in labels_hit if lab not in NON_ATTACK_LABELS}
+        if attack_hit_labels:
+            attack_hit += 1
+            hit_episodes.update(lab for lab in attack_hit_labels if lab in attack_set)
+        rule_ids = sorted({det.rule_id for det in members}) or \
+            sorted((incident.metadata or {}).get("rule_ids", []))
+        compositions["+".join(rule_ids) if rule_ids else "<unknown>"] += 1
+        network_entities = (incident.metadata or {}).get("network_entities")
+        if network_entities:
+            with_network += 1
+    total = len(incidents)
+    in_scope = len(hit_episodes & attack_set)
+    return {
+        "total_incidents": total,
+        "attack_incidents": attack_hit,
+        "incident_attack_hit": attack_hit,
+        "benign_incidents": total - attack_hit,
+        "incident_precision": attack_hit / total if total else None,
+        "attack_bucket_count": len(attack_set),
+        "attack_bucket_hit": in_scope,
+        "incident_recall": (in_scope / len(attack_set)) if attack_set else None,
+        "detections_per_incident": (sum(sizes) / total) if total else None,
+        "median_detections_per_incident": _median_number(sizes),
+        "max_detections_per_incident": max(sizes) if sizes else None,
+        "rule_composition": dict(sorted(compositions.items())),
+        "incidents_with_evidence": sum(1 for i in incidents if i.evidence_event_ids),
+        "incidents_with_buckets": with_buckets,
+        "incidents_with_network": with_network,
+    }
+
+
 def reservoir_sample(rows: list, count: int, sample_seed: int) -> list:
     """Deterministic label-blind sampling. Order-independent of input order."""
     rng = random.Random(sample_seed)
@@ -669,7 +796,8 @@ def build_summary(run_id: str, files: list[str], params: dict, stats: dict,
                   per_rule: dict, overall: dict, coverage: dict,
                   fp_notes: list[dict], leakage_ok: bool,
                   bucket: dict | None = None,
-                  per_rule_bucket: dict | None = None) -> dict:
+                  per_rule_bucket: dict | None = None,
+                  incident: dict | None = None) -> dict:
     return {
         "run_id": run_id,
         "files": sorted(files),
@@ -680,6 +808,7 @@ def build_summary(run_id: str, files: list[str], params: dict, stats: dict,
         "label_coverage": coverage,
         "bucket": bucket,
         "per_rule_bucket": per_rule_bucket,
+        "incident": incident,
         "false_positives": fp_notes,
         "leakage_check": "pass" if leakage_ok else "fail",
     }
@@ -744,12 +873,13 @@ def render_markdown(summary: dict) -> str:
         "",
     ]
     bucket = summary.get("bucket") or {}
-    if bucket:
-        def show(value):
-            if value is None:
-                return "n/a"
-            return f"{value:.3f}" if isinstance(value, float) else str(value)
 
+    def show(value):
+        if value is None:
+            return "n/a"
+        return f"{value:.3f}" if isinstance(value, float) else str(value)
+
+    if bucket:
         lines.append(
             f"- detection buckets: {bucket['detection_bucket_count']} "
             f"(evaluated {bucket['evaluated_buckets']}, "
@@ -768,6 +898,38 @@ def render_markdown(summary: dict) -> str:
                 f"(precision {show(metrics['bucket_precision'])}), episodes "
                 f"{metrics['attack_bucket_hit']}/{metrics['attack_bucket_count']} "
                 f"(recall {show(metrics['bucket_recall'])})")
+        lines.append("")
+    incident = summary.get("incident") or {}
+    lines += [
+        "## Incident-level metrics",
+        "",
+        "Incidents group detections with the application correlation engine;",
+        "an incident is an attack hit iff its member buckets intersect an",
+        "attack episode. No incident false-positive rate is reported: benign",
+        "episodes are not a partition, so a conventional denominator would",
+        "mislead. Incident metrics complement detection metrics.",
+        "",
+    ]
+    if incident:
+        lines.append(
+            f"- incidents: {incident['total_incidents']} "
+            f"(attack-hit {incident['attack_incidents']}, benign "
+            f"{incident['benign_incidents']}, precision "
+            f"{show(incident['incident_precision'])})")
+        lines.append(
+            f"- attack episodes hit: {incident['attack_bucket_hit']}/"
+            f"{incident['attack_bucket_count']} "
+            f"(recall {show(incident['incident_recall'])})")
+        lines.append(
+            f"- detections per incident: mean "
+            f"{show(incident['detections_per_incident'])}, median "
+            f"{show(incident['median_detections_per_incident'])}, max "
+            f"{show(incident['max_detections_per_incident'])}")
+        for composition, count in sorted((incident.get("rule_composition") or {}).items()):
+            lines.append(f"- {composition}: {count} incident(s)")
+        lines.append(
+            f"- coverage: with buckets {incident['incidents_with_buckets']}, "
+            f"with network {incident['incidents_with_network']}")
         lines.append("")
     lines += [
         "## Notes",

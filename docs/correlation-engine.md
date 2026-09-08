@@ -82,3 +82,22 @@ merges. Reruns and input shuffles are fingerprint-identical.
 - No cross-host campaign tracking yet (explicitly requires extra signals).
 - Volume-only signals (NET-002, DATA-001) link only via entity+sequence.
 - Synthetic validation is lab-only, not production evidence.
+
+## Network-aware FLOW correlation (Slice 14)
+
+FLOW detections carry no user/host, so the user+host branch never fires for
+them; they previously always became singleton incidents. A parallel
+FLOW-to-FLOW branch links pairs when: compatible network entity AND gap
+within `network_window_minutes` (default 30, separate knob) AND (shared
+complete `bucket_event_ids` OR configured FLOW sequence pair). Sequence pairs
+(`FLOW-003`→`FLOW-002`, `FLOW-001`→`FLOW-006`) may additionally bridge
+incompatible entities when bucket flows are shared. Entity keys are
+metadata-derived: destination host (001/004/006), destination service
+(002), scanner source (003 scan), protocol/port (005); entropy fallback and
+GLOBAL/unknown keys yield no entity and never link. Bare IP, bare port,
+protocol-alone, and time-alone are rejected as link bases. Union-find,
+fingerprints, scoring weights, and the existing branch are unchanged;
+non-FLOW behavior is bit-identical. Transitive chaining follows only valid
+links; no span cap is imposed yet (deferred — no pathology observed, would
+need evidence before choosing a value). FLOW↔non-FLOW linking is deferred
+pending a host/IP identity design.
