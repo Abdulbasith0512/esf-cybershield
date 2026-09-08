@@ -97,7 +97,14 @@ folds into DATA-001-adjacent context instead of standing alone.
   exclusive-end convention. Slice-23 1M analysis showed 99% of legacy fires
   accumulated over near-full 5-minute spans (median 268 s).
 - **Threshold:** ≥ 15 distinct destination ports from one source (unchanged);
-  minimum evidence 15 flows (one per port, earliest per port).
+  minimum evidence 15 flows (one per port, earliest per port). Additionally,
+  a strict majority (`scan_unanswered_syn_fraction`, default 0.5) of the
+  dense-window representatives must be unanswered SYN probes (TCP with SYN
+  exceeding ACK; UDP/FIN-only/missing flags fail closed). Slice-26 1M
+  analysis showed all surviving dense buckets were ACK-completed session
+  chatter (0/1410 probe flows), so port diversity + density alone could not
+  separate scanning from background. Majority chosen from threat semantics
+  (a scan's port sample is mostly probes), never tuned on benchmarks.
 - **Severity:** MEDIUM. **Confidence:** `min(0.55 + 0.02 * distinct_ports, 0.85)`.
 - **Evidence:** earliest flow per distinct port, capped at 20.
   **Bucket:** distinct-port representatives inside the dense span (evidence

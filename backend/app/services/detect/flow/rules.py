@@ -169,6 +169,14 @@ class PortScan:
         out.extend(self._entropy_fallback(pairs))
         return out
 
+    @staticmethod
+    def _is_probe(view: FlowView) -> bool:
+        """Unanswered SYN probe: TCP with SYNs exceeding ACKs. Missing flag
+        counts read as zero, so UDP, FIN-only, and unknown traffic fail
+        closed instead of guessing."""
+        return view.protocol == "TCP" and \
+            view.flow_value("SYN Flag Cnt") > view.flow_value("ACK Flag Cnt")
+
     def _scan_mode(self, pairs):
         groups: dict[str, list[tuple[FlowView, dict]]] = {}
         for v, r in pairs:
@@ -198,6 +206,10 @@ class PortScan:
                         port = item[0].destination_port
                         if port is not None and port not in by_dense:
                             by_dense[port] = item
+                    probes = sum(1 for view, _ in by_dense.values()
+                                 if self._is_probe(view))
+                    if probes / len(by_dense) <= self.config.scan_unanswered_syn_fraction:
+                        continue
                     chosen = [by_dense[p] for p in sorted(by_dense)[:20]]
                     chosen.sort(key=lambda t: (t[0].ts, t[0].event_id))
                     rows = [r for _, r in chosen]

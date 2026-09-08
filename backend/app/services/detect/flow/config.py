@@ -26,6 +26,12 @@ class FlowConfig:
     # spreads over minutes. Span comparison uses a strict less-than against
     # this value, mirroring the outer window's exclusive-end convention.
     scan_density_window_seconds: int = 60
+    # SYN-probe majority: fraction of the dense-window distinct-port
+    # representatives that must be unanswered SYN probes (SYN without ACK
+    # completion). Rationale: strict majority, so a scan's port sample is
+    # mostly probes; ordinary completed sessions never qualify. Chosen from
+    # threat semantics and fixtures only — never tuned against benchmarks.
+    scan_unanswered_syn_fraction: float = 0.5
     # Shannon entropy ceiling for the weak flow-only fallback. Provisional;
     # to be calibrated on benign traffic in the evaluation slice.
     scan_entropy_threshold: float = 4.0
