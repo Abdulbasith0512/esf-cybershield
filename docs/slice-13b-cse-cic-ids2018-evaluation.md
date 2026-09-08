@@ -49,6 +49,18 @@ FPR, positive/benign support. `None` (rendered `n/a`) wherever a denominator
 is undefined — never silent zeros. Overall: unique-event coverage, totals.
 No averaged F1. Per-label coverage tables read labels verbatim.
 
+## 6b. Bucket-level metrics (Slice 13F)
+
+Evidence caps (20/20/20/3/5/20) structurally limit event recall, so each
+detection also exposes its complete label-free contributor set
+(`bucket_event_ids`). Post-hoc, one attack episode is defined per distinct
+normalized non-benign label; a detection bucket is TP iff its bucket IDs
+intersect any episode, and an episode is hit iff any bucket intersects it.
+Bucket precision = TP buckets / evaluated buckets; bucket recall = episodes
+hit / episodes (binary on single-campaign slices). Detections without bucket
+membership are reported unavailable, never silent FPs. Bucket metrics
+complement, never replace, evidence-level metrics.
+
 ## 7. Large-file processing
 
 `--chunk-rows N` streams bounded row blocks with a temporal overlap carry

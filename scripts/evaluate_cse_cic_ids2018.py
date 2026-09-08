@@ -22,7 +22,9 @@ from app.services.datasets.cse_cic_ids2018 import ADAPTER_VERSION, CseCicIds2018
 from app.services.detect.common import prepare  # noqa: E402
 from app.services.datasets.evaluate import (  # noqa: E402
     BENIGN_LABEL,
+    attack_labels_from_totals,
     attribute,
+    bucket_metrics,
     build_summary,
     chunked_detect,
     collect_evidence_labels,
@@ -30,6 +32,7 @@ from app.services.datasets.evaluate import (  # noqa: E402
     label_by_event,
     label_coverage,
     overall_summary,
+    per_rule_bucket_metrics,
     render_markdown,
     reservoir_sample,
     rule_metrics,
@@ -168,9 +171,12 @@ def main() -> None:
     label_totals: dict[str, int] = {}
     if chunked:
         # Second pass: labels + totals only; detectors already ran.
+        # Bucket IDs join the wanted set so bucket-hit metrics resolve labels
+        # for complete buckets, not just capped evidence (one streaming pass).
         wanted: set[str] = set()
         for det in all_dets:
             wanted.update(det.evidence_event_ids)
+            wanted.update(det.bucket_event_ids)
         totals: Counter[str] = Counter()
         for path_str in files:
             path = Path(path_str)
@@ -206,6 +212,9 @@ def main() -> None:
     per_rule = rule_metrics(all_dets, labels, support_positive, universe_size)
     overall = overall_summary(all_dets, labels, support_positive, universe_size)
     coverage = coverage_from_labels(all_dets, labels, label_totals)
+    attack_labels = attack_labels_from_totals(label_totals)
+    bucket = bucket_metrics(all_dets, labels, attack_labels)
+    per_rule_bucket = per_rule_bucket_metrics(all_dets, labels, attack_labels)
 
     fp_notes = []
     for det in sorted(all_dets, key=lambda d: d.fingerprint)[:20]:
@@ -218,7 +227,8 @@ def main() -> None:
                             {"rows": stats.get("rows", 0), "events": len(all_events) or "streamed",
                              "detections": len(all_dets),
                              "runtime_s": round(time.perf_counter() - started, 1)},
-                            per_rule, overall, coverage, fp_notes, True)
+                            per_rule, overall, coverage, fp_notes, True,
+                            bucket=bucket, per_rule_bucket=per_rule_bucket)
     outdir = Path(args.outdir)
     if not outdir.is_absolute():
         outdir = REPO / outdir

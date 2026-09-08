@@ -168,6 +168,106 @@ def label_coverage(detections: list, events: list[dict]) -> dict[str, dict]:
     return coverage_from_labels(detections, labels, dict(totals))
 
 
+EMPTY_LABEL = "<empty>"
+NON_ATTACK_LABELS = frozenset({BENIGN_LABEL, "", EMPTY_LABEL})
+
+
+def attack_labels_from_totals(totals: dict[str, int]) -> list[str]:
+    """Sorted distinct non-benign labels observed in the evaluated stream."""
+    return sorted(lab for lab, count in totals.items()
+                  if lab not in NON_ATTACK_LABELS and count > 0)
+
+
+def build_attack_episodes(label_map: dict[str, str]) -> dict[str, set[str]]:
+    """Post-hoc attack episodes: one per distinct normalized non-benign label.
+
+    Must be called only after detection has finished; labels never flow into
+    detectors or bucket construction. Episode membership is the full set of
+    labelled event IDs, never reconstructed from capped evidence.
+    """
+    episodes: dict[str, set[str]] = {}
+    for event_id, label in label_map.items():
+        if label not in NON_ATTACK_LABELS:
+            episodes.setdefault(label, set()).add(event_id)
+    return episodes
+
+
+def _bucket_hit_labels(bucket_ids: list[str],
+                       label_lookup: dict[str, str]) -> set[str] | None:
+    """Attack labels intersected by one detection bucket, or None when the
+    bucket is unevaluable (empty membership, or no member has a known label).
+
+    Unknown member IDs are ignored. An evaluable all-benign bucket returns an
+    empty set (bucket FP), never None. Empty membership is unavailable, never
+    a false positive.
+    """
+    if not bucket_ids:
+        return None
+    known = {label_lookup[eid] for eid in set(bucket_ids) if eid in label_lookup}
+    if not known:
+        return None
+    return {lab for lab in known if lab not in NON_ATTACK_LABELS}
+
+
+def _bucket_status(evaluated: int, unavailable: int) -> tuple[str, str]:
+    if unavailable == 0:
+        return "available", ""
+    if evaluated == 0:
+        return "unavailable", "no detection carries bucket_event_ids"
+    return ("partial",
+            f"{unavailable} detection(s) carry no bucket_event_ids and are excluded")
+
+
+def bucket_metrics(detections: list, bucket_labels: dict[str, str],
+                   attack_labels) -> dict:
+    """Global bucket-hit metrics. Zero-denominator policy: precision is None
+    with no evaluable buckets; recall is None with no attack episodes."""
+    attack_set = set(attack_labels)
+    tp = fp = evaluated = unavailable = 0
+    hit: set[str] = set()
+    for det in detections:
+        result = _bucket_hit_labels(det.bucket_event_ids, bucket_labels)
+        if result is None:
+            unavailable += 1
+            continue
+        evaluated += 1
+        if result:
+            tp += 1
+            hit.update(result)
+        else:
+            fp += 1
+    status, reason = _bucket_status(evaluated, unavailable)
+    hit_in_scope = hit & attack_set
+    return {
+        "detection_bucket_count": len(detections),
+        "evaluated_buckets": evaluated,
+        "unavailable_buckets": unavailable,
+        "bucket_tp": tp,
+        "bucket_fp": fp,
+        "bucket_precision": tp / (tp + fp) if evaluated else None,
+        "attack_bucket_count": len(attack_set),
+        "attack_bucket_hit": len(hit_in_scope),
+        "bucket_recall": (len(hit_in_scope) / len(attack_set)) if attack_set else None,
+        "bucket_metric_status": status,
+        "bucket_metric_reason": reason,
+    }
+
+
+def per_rule_bucket_metrics(detections: list, bucket_labels: dict[str, str],
+                            attack_labels) -> dict[str, dict]:
+    """Per-rule bucket-hit metrics. The attack-episode denominator is the same
+    global episode set for every rule; each rule reports the episodes its own
+    detections hit. Rules with no detections are absent."""
+    attack_set = set(attack_labels)
+    by_rule: dict[str, list] = {}
+    for det in detections:
+        by_rule.setdefault(det.rule_id, []).append(det)
+    out = {}
+    for rule_id in sorted(by_rule):
+        out[rule_id] = bucket_metrics(by_rule[rule_id], bucket_labels, attack_set)
+    return out
+
+
 def reservoir_sample(rows: list, count: int, sample_seed: int) -> list:
     """Deterministic label-blind sampling. Order-independent of input order."""
     rng = random.Random(sample_seed)
@@ -567,7 +667,9 @@ def run_id_for(files: list[str], params: dict) -> str:
 
 def build_summary(run_id: str, files: list[str], params: dict, stats: dict,
                   per_rule: dict, overall: dict, coverage: dict,
-                  fp_notes: list[dict], leakage_ok: bool) -> dict:
+                  fp_notes: list[dict], leakage_ok: bool,
+                  bucket: dict | None = None,
+                  per_rule_bucket: dict | None = None) -> dict:
     return {
         "run_id": run_id,
         "files": sorted(files),
@@ -576,6 +678,8 @@ def build_summary(run_id: str, files: list[str], params: dict, stats: dict,
         "per_rule": per_rule,
         "overall": overall,
         "label_coverage": coverage,
+        "bucket": bucket,
+        "per_rule_bucket": per_rule_bucket,
         "false_positives": fp_notes,
         "leakage_check": "pass" if leakage_ok else "fail",
     }
@@ -597,6 +701,11 @@ def render_markdown(summary: dict) -> str:
         f"- detections: {summary['stats'].get('detections', '?')}",
         "",
         "## Per-rule metrics",
+        "",
+        "Evidence-level metrics measure labelled event coverage from capped",
+        "`evidence_event_ids` (caps 20/20/20/3/5/20 for FLOW-001..006);",
+        "event-level recall therefore measures evidence coverage, not complete",
+        "detection-bucket coverage.",
         "",
         "| rule | detections | covered | TP | FP | FN | precision | recall | F1 | FPR |",
         "|---|---|---|---|---|---|---|---|---|---|",
@@ -622,6 +731,45 @@ def render_markdown(summary: dict) -> str:
         lines.append(f"- {label}: {cov['covered']}/{cov['events']} ({pct})")
     lines += [
         "",
+        "## Bucket-level metrics",
+        "",
+        "Each DetectionResult is one detection bucket (`bucket_event_ids`, the",
+        "complete label-free contributor set). Bucket precision asks whether a",
+        "detection bucket intersects attack activity; bucket recall asks whether",
+        "each post-hoc label-defined attack episode was hit. Labels are resolved",
+        "only after detection. The fixed 1M slice contains one non-benign attack",
+        "label, so bucket recall is binary there; this is a property of the slice,",
+        "not of CSE-CIC-IDS2018 generally. Bucket metrics complement rather than",
+        "replace evidence-level metrics.",
+        "",
+    ]
+    bucket = summary.get("bucket") or {}
+    if bucket:
+        def show(value):
+            if value is None:
+                return "n/a"
+            return f"{value:.3f}" if isinstance(value, float) else str(value)
+
+        lines.append(
+            f"- detection buckets: {bucket['detection_bucket_count']} "
+            f"(evaluated {bucket['evaluated_buckets']}, "
+            f"unavailable {bucket['unavailable_buckets']})")
+        lines.append(
+            f"- bucket TP/FP: {bucket['bucket_tp']}/{bucket['bucket_fp']} "
+            f"(precision {show(bucket['bucket_precision'])})")
+        lines.append(
+            f"- attack episodes hit: {bucket['attack_bucket_hit']}/"
+            f"{bucket['attack_bucket_count']} "
+            f"(recall {show(bucket['bucket_recall'])})")
+        for rule_id, metrics in sorted((summary.get("per_rule_bucket") or {}).items()):
+            lines.append(
+                f"- {rule_id}: buckets {metrics['detection_bucket_count']}, "
+                f"TP/FP {metrics['bucket_tp']}/{metrics['bucket_fp']} "
+                f"(precision {show(metrics['bucket_precision'])}), episodes "
+                f"{metrics['attack_bucket_hit']}/{metrics['attack_bucket_count']} "
+                f"(recall {show(metrics['bucket_recall'])})")
+        lines.append("")
+    lines += [
         "## Notes",
         "",
         "- Labels were read AFTER detection for reporting only.",

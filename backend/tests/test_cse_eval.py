@@ -34,6 +34,17 @@ def labeled(ids, label):
     return {e: ("Benign" if label == "benign" else label) for e in ids}
 
 
+def bdet(rule_id, evidence, bucket, conf=0.8, ts="2026-09-03T09:00:00"):
+    """DetectionResult with explicit bucket membership for bucket tests."""
+    ids = sorted(evidence)
+    return DetectionResult(
+        detection_id=detection_id_for(rule_id, ids), rule_id=rule_id,
+        rule_name=f"Rule {rule_id}", severity="MEDIUM", confidence=conf,
+        reason=f"{rule_id} fired", evidence_event_ids=ids,
+        bucket_event_ids=sorted(bucket),
+        first_seen=ts, last_seen=ts, metadata={})
+
+
 # A. label normalization
 def test_normalize_label():
     assert ev.normalize_label("  Benign ") == "Benign"
@@ -405,3 +416,116 @@ def test_cli_order_flag_wiring():
     sig = inspect.signature(ev.chunked_detect)
     assert "order" in sig.parameters
     assert sig.parameters["order"].default == "file"
+
+
+# ---------------- Bucket-level metrics (Slice 13F) ----------------
+
+def test_bucket_single_hit():
+    labels = {"e1": "Benign", "e2": "X", "e3": "X"}
+    mets = ev.bucket_metrics([bdet("FLOW-001", ["e1"], ["e1", "e2", "e3"])], labels, ["X"])
+    assert (mets["bucket_tp"], mets["bucket_fp"]) == (1, 0)
+    assert mets["bucket_precision"] == 1
+    assert (mets["attack_bucket_count"], mets["attack_bucket_hit"]) == (1, 1)
+    assert mets["bucket_recall"] == 1
+    assert mets["bucket_metric_status"] == "available"
+
+
+def test_bucket_benign_only():
+    labels = {"e1": "Benign", "e2": "X"}
+    mets = ev.bucket_metrics([bdet("FLOW-001", ["e1"], ["e1"])], labels, ["X"])
+    assert (mets["bucket_tp"], mets["bucket_fp"]) == (0, 1)
+    assert mets["bucket_precision"] == 0
+    assert mets["attack_bucket_hit"] == 0 and mets["bucket_recall"] == 0
+
+
+def test_bucket_multi_dets_same_episode():
+    labels = {"e1": "X", "e2": "X", "e3": "Benign"}
+    dets = [bdet("FLOW-001", ["e1"], ["e1", "e3"]),
+            bdet("FLOW-002", ["e2"], ["e2", "e3"])]
+    mets = ev.bucket_metrics(dets, labels, ["X"])
+    assert mets["detection_bucket_count"] == 2 and mets["bucket_tp"] == 2
+    assert (mets["attack_bucket_count"], mets["attack_bucket_hit"]) == (1, 1)
+    assert mets["bucket_recall"] == 1
+    per = ev.per_rule_bucket_metrics(dets, labels, ["X"])
+    assert per["FLOW-001"]["bucket_tp"] == 1 and per["FLOW-002"]["bucket_tp"] == 1
+
+
+def test_bucket_one_det_two_episodes():
+    labels = {"ex": "X", "ey": "Y", "eb": "Benign"}
+    mets = ev.bucket_metrics([bdet("FLOW-001", ["ex"], ["ex", "ey", "eb"])],
+                             labels, ["X", "Y"])
+    assert mets["bucket_tp"] == 1  # one detection counts once
+    assert mets["attack_bucket_hit"] == 2 and mets["bucket_recall"] == 1
+
+
+def test_bucket_multi_labels():
+    labels = {"a1": "X", "b1": "Y", "c1": "Benign"}
+    episodes = ev.build_attack_episodes(labels)
+    assert sorted(episodes) == ["X", "Y"] and "Benign" not in episodes
+    assert ev.attack_labels_from_totals({"X": 2, "Y": 1, "Benign": 5, "": 0}) == ["X", "Y"]
+    assert ev.attack_labels_from_totals({"Benign": 3}) == []
+
+
+def test_bucket_empty_sets():
+    assert ev.bucket_metrics([], {"e1": "X"}, ["X"])["bucket_precision"] is None
+    assert ev.bucket_metrics([], {"e1": "X"}, ["X"])["bucket_recall"] == 0
+    assert ev.bucket_metrics([], {}, [])["bucket_recall"] is None
+
+
+def test_bucket_evidence_independence():
+    labels = {"e1": "Benign", "e2": "Attack"}
+    d1 = bdet("FLOW-001", ["e1"], ["e1", "e2"])
+    d2 = bdet("FLOW-001", ["e2"], ["e1", "e2"])
+    assert ev.bucket_metrics([d1], labels, ["Attack"]) == \
+        ev.bucket_metrics([d2], labels, ["Attack"])
+    m1 = ev.rule_metrics([d1], labels)["FLOW-001"]
+    m2 = ev.rule_metrics([d2], labels)["FLOW-001"]
+    assert (m1["tp"], m1["fp"]) == (0, 1) and (m2["tp"], m2["fp"]) == (1, 0)
+
+
+def test_bucket_label_mutation():
+    dets = [bdet("FLOW-001", ["e1"], ["e1", "e2"])]
+    before = ev.bucket_metrics(dets, {"e1": "X", "e2": "X"}, ["X"])
+    after = ev.bucket_metrics(dets, {"e1": "Benign", "e2": "Benign"}, ["X"])
+    assert (before["bucket_tp"], after["bucket_fp"]) == (1, 1)
+    assert after["bucket_recall"] == 0
+    assert dets[0].bucket_event_ids == ["e1", "e2"]  # membership untouched
+
+
+def test_bucket_determinism():
+    labels = {"e1": "X", "e2": "Benign"}
+    dets = [bdet("FLOW-002", ["e1"], ["e1", "e2"]), bdet("FLOW-001", ["e2"], ["e2"])]
+    first = json.dumps(ev.bucket_metrics(dets, labels, ["X"]), sort_keys=True)
+    assert json.dumps(ev.bucket_metrics(list(dets), dict(labels), ["X"]),
+                      sort_keys=True) == first
+    assert json.dumps(ev.per_rule_bucket_metrics(dets, labels, ["X"]),
+                      sort_keys=True) == json.dumps(
+                          ev.per_rule_bucket_metrics(dets, labels, ["X"]), sort_keys=True)
+
+
+def test_bucket_evidence_regression():
+    labels = {"e1": "Benign", "e2": "Attack"}
+    plain = det("FLOW-001", ["e1", "e2"])
+    with_bucket = bdet("FLOW-001", ["e1", "e2"], ["e1", "e2", "e3"])
+    assert ev.rule_metrics([plain], labels) == ev.rule_metrics([with_bucket], labels)
+    assert ev.attribute([plain], labels) == ev.attribute([with_bucket], labels)
+
+
+def test_bucket_unavailable():
+    labels = {"e1": "X"}
+    mets = ev.bucket_metrics([det("FLOW-009", ["e1"])], labels, ["X"])
+    assert mets["bucket_fp"] == 0 and mets["evaluated_buckets"] == 0
+    assert mets["unavailable_buckets"] == 1 and mets["bucket_precision"] is None
+    assert mets["bucket_metric_status"] == "unavailable" and mets["bucket_metric_reason"]
+    per = ev.per_rule_bucket_metrics([det("FLOW-009", ["e1"])], labels, ["X"])
+    assert per["FLOW-009"]["bucket_metric_status"] == "unavailable"
+
+
+def test_bucket_posthoc_ordering():
+    import inspect  # noqa: E402
+
+    for fn in ("chunked_detect", "_chunked_detect_time_ordered",
+               "_read_group", "build_time_index"):
+        params = inspect.signature(getattr(ev, fn)).parameters
+        assert not [p for p in params if "label" in p], fn
+    assert set(inspect.signature(ev.build_attack_episodes).parameters) == {"label_map"}
