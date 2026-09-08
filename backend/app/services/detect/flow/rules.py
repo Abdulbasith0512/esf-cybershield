@@ -175,6 +175,7 @@ class PortScan:
             if v.source_ip:
                 groups.setdefault(v.source_ip, []).append((v, r))
         window = timedelta(minutes=self.config.scan_window_minutes)
+        dense = timedelta(seconds=self.config.scan_density_window_seconds)
         out = []
         for ip, members in groups.items():
             members.sort(key=lambda t: (t[0].ts, t[0].event_id))
@@ -189,22 +190,56 @@ class PortScan:
                     if port is not None and port not in by_port:
                         by_port[port] = item
                 if len(by_port) >= self.config.scan_min_ports:
-                    chosen = [by_port[p] for p in sorted(by_port)[:20]]
+                    dense_span = self._dense_span(windowed)
+                    if dense_span is None:
+                        continue
+                    by_dense: dict[int, tuple[FlowView, dict]] = {}
+                    for item in dense_span:
+                        port = item[0].destination_port
+                        if port is not None and port not in by_dense:
+                            by_dense[port] = item
+                    chosen = [by_dense[p] for p in sorted(by_dense)[:20]]
                     chosen.sort(key=lambda t: (t[0].ts, t[0].event_id))
                     rows = [r for _, r in chosen]
-                    # Full distinct-port set; evidence above keeps the first 20.
+                    # Full distinct-port set of the dense span; evidence above
+                    # keeps the first 20.
                     bucket_rows = [r for _, r in sorted(
-                        by_port.values(), key=lambda t: (t[0].ts, t[0].event_id))]
+                        by_dense.values(), key=lambda t: (t[0].ts, t[0].event_id))]
                     out.append(make_result(
                         self.rule_id, self.name, self.severity,
-                        min(0.55 + 0.02 * len(by_port), 0.85),
-                        (f"Port-scan-like behavior detected: {len(by_port)} distinct "
+                        min(0.55 + 0.02 * len(by_dense), 0.85),
+                        (f"Port-scan-like behavior detected: {len(by_dense)} distinct "
                          f"destination ports contacted from {ip} within 5 minutes."),
                         rows,
-                        {"source_ip": ip, "distinct_ports": len(by_port)},
+                        {"source_ip": ip, "distinct_ports": len(by_dense)},
                         bucket=bucket_rows))
                     start = end + 1
         return out
+
+    def _dense_span(self, windowed: list) -> list | None:
+        """Earliest-ending run of windowed members holding scan_min_ports
+        distinct destination ports within less than the density window.
+        Two-pointer scan over the already time-sorted window."""
+        dense = timedelta(seconds=self.config.scan_density_window_seconds)
+        counts: Counter = Counter()
+        distinct = 0
+        low = 0
+        for high in range(len(windowed)):
+            port = windowed[high][0].destination_port
+            if port is not None:
+                if counts[port] == 0:
+                    distinct += 1
+                counts[port] += 1
+            while windowed[high][0].ts - windowed[low][0].ts >= dense:
+                old = windowed[low][0].destination_port
+                if old is not None:
+                    counts[old] -= 1
+                    if counts[old] == 0:
+                        distinct -= 1
+                low += 1
+            if distinct >= self.config.scan_min_ports:
+                return windowed[low:high + 1]
+        return None
 
     def _entropy_fallback(self, pairs):
         """Weak flow-only fallback: global per-minute destination-port Shannon

@@ -19,6 +19,13 @@ class FlowConfig:
     # FLOW-003
     scan_window_minutes: int = 5
     scan_min_ports: int = 15
+    # Temporal-density sub-window: distinct ports must accumulate within this
+    # many seconds inside the outer scan window. Rationale: the engine's
+    # canonical short timescale is one minute (rate/byte/entropy windows);
+    # genuine scans complete in seconds while benign multi-service chatter
+    # spreads over minutes. Span comparison uses a strict less-than against
+    # this value, mirroring the outer window's exclusive-end convention.
+    scan_density_window_seconds: int = 60
     # Shannon entropy ceiling for the weak flow-only fallback. Provisional;
     # to be calibrated on benign traffic in the evaluation slice.
     scan_entropy_threshold: float = 4.0

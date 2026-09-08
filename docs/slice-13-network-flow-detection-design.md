@@ -88,11 +88,21 @@ folds into DATA-001-adjacent context instead of standing alone.
   short window indicates reconnaissance.
 - **Fields:** `source_ip` (required), `destination_port`, `timestamp`.
 - **Key:** `source_ip`.
-- **Window:** 5 min sliding.
-- **Threshold:** ≥ 15 distinct destination ports from one source;
+- **Window:** 5 min sliding outer search context per source IP, plus a dense
+  sub-window requirement: the 15 distinct ports must accumulate within
+  `scan_density_window_seconds` (default 60, the engine's canonical short
+  timescale shared with rate/byte/entropy windows). Rapid scans complete in
+  seconds; slow benign multi-service chatter spread over minutes stays
+  silent. Span comparison is strict less-than, mirroring the outer window's
+  exclusive-end convention. Slice-23 1M analysis showed 99% of legacy fires
+  accumulated over near-full 5-minute spans (median 268 s).
+- **Threshold:** ≥ 15 distinct destination ports from one source (unchanged);
   minimum evidence 15 flows (one per port, earliest per port).
 - **Severity:** MEDIUM. **Confidence:** `min(0.55 + 0.02 * distinct_ports, 0.85)`.
 - **Evidence:** earliest flow per distinct port, capped at 20.
+  **Bucket:** distinct-port representatives inside the dense span (evidence
+  keeps the first 20); first-fire/reset preserved, so one scan yields one
+  detection. Entropy fallback unchanged.
 - **Reason:** `"Port-scan-like behavior detected: {k} distinct destination ports contacted from {ip} within 5 minutes."`
 - **Coverage:** **endpoint-aware only.** Flow-only fallback: global
   destination-port entropy per minute (documented as weak; short windows

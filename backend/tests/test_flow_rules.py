@@ -89,7 +89,7 @@ def test_flow002_nonqualifying_silent():
 # ---------------- FLOW-003 ----------------
 
 def test_flow003_fires():
-    evts = [flow(seconds=i * 10, sip="10.1.2.3", dport=1000 + i) for i in range(16)]
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(16)]
     dets = run("FLOW-003", evts)
     scans = [d for d in dets if d.rule_name == "Port-Scan-like Behavior"]
     assert len(scans) == 1
@@ -101,6 +101,78 @@ def test_flow003_fires():
 def test_flow003_below_threshold():
     evts = [flow(seconds=i * 10, sip="10.1.2.3", dport=1000 + i) for i in range(8)]
     assert [d for d in run("FLOW-003", evts) if d.rule_name == "Port-Scan-like Behavior"] == []
+
+
+def test_flow003_slow_accumulation_silent():
+    # 15 ports spread over ~5 minutes: benign chatter, never dense.
+    evts = [flow(seconds=i * 20, sip="10.1.2.3", dport=1000 + i) for i in range(15)]
+    assert run("FLOW-003", evts) == []
+
+
+def test_flow003_rapid_scan_fires():
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(15)]
+    (d,) = [x for x in run("FLOW-003", evts) if x.rule_name == "Port-Scan-like Behavior"]
+    assert len(d.bucket_event_ids) == 15
+
+
+def test_flow003_density_boundary():
+    base = [flow(seconds=4 * i, sip="10.1.2.3", dport=1000 + i) for i in range(14)]
+    just_out = base + [flow(seconds=60, sip="10.1.2.3", dport=2000)]
+    just_in = base + [flow(seconds=59, sip="10.1.2.3", dport=2000)]
+    assert run("FLOW-003", just_out) == []  # span exactly 60: exclusive end
+    assert len(run("FLOW-003", just_in)) == 1  # span 59: inside
+
+
+def test_flow003_many_ports_rapid():
+    evts = [flow(seconds=i, sip="10.1.2.3", dport=1000 + i) for i in range(25)]
+    (d,) = [x for x in run("FLOW-003", evts) if x.rule_name == "Port-Scan-like Behavior"]
+    assert len(d.bucket_event_ids) == 15
+
+
+def test_flow003_duplicate_ports_silent():
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + (i % 8)) for i in range(40)]
+    assert run("FLOW-003", evts) == []
+
+
+def test_flow003_outer_context_insufficient():
+    # 15 distinct ports inside the 5-minute outer window, but no 60-second
+    # span holds 15: the outer context alone must not fire.
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(14)]
+    evts.append(flow(seconds=200, sip="10.1.2.3", dport=2000))
+    assert run("FLOW-003", evts) == []
+
+
+def test_flow003_repeated_scans_no_dupes():
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(15)]
+    evts += [flow(seconds=600 + i * 2, sip="10.1.2.3", dport=2000 + i) for i in range(15)]
+    dets = [d for d in run("FLOW-003", evts) if d.rule_name == "Port-Scan-like Behavior"]
+    assert len(dets) == 2
+    assert dets[0].fingerprint != dets[1].fingerprint
+    assert all(len(d.bucket_event_ids) == 15 for d in dets)
+
+
+def test_flow003_bucket_is_dense_span():
+    from datetime import timezone  # noqa: E402
+
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(15)]
+    (d,) = [x for x in run("FLOW-003", evts) if x.rule_name == "Port-Scan-like Behavior"]
+    by_id = {e["event_id"]: e for e in evts}
+    stamps = sorted(by_id[eid]["timestamp"] for eid in d.bucket_event_ids)
+    span = (datetime.fromisoformat(stamps[-1]) - datetime.fromisoformat(stamps[0]))
+    assert span.total_seconds() < 60
+    assert d.fingerprint == [x for x in run("FLOW-003", list(evts))
+                             if x.rule_name == "Port-Scan-like Behavior"][0].fingerprint
+
+
+def test_flow003_shuffle_invariant():
+    import random  # noqa: E402
+
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(15)]
+    first = [d.model_dump(mode="json") for d in run("FLOW-003", evts)]
+    rng = random.Random(24)
+    shuffled = list(evts)
+    rng.shuffle(shuffled)
+    assert [d.model_dump(mode="json") for d in run("FLOW-003", shuffled)] == first
 
 
 def test_flow003_requires_source_ip():
@@ -311,7 +383,7 @@ def test_bucket_002_fire_and_clear():
 
 
 def test_bucket_003_scan_complete():
-    evts = [flow(seconds=i * 10, sip="10.1.2.3", dport=1000 + i) for i in range(16)]
+    evts = [flow(seconds=i * 2, sip="10.1.2.3", dport=1000 + i) for i in range(16)]
     dets = run("FLOW-003", evts)
     scans = [d for d in dets if d.rule_name == "Port-Scan-like Behavior"]
     assert len(scans) == 1
