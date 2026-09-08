@@ -85,4 +85,14 @@ no fabricated telemetry.
 ## Explicitly out of scope for Step 1
 
 Authentication, detection rules, ML models, RAG, Neo4j wiring, dashboards.
+
+## Detection evaluation (current benchmark posture)
+
+Network-flow detection is evaluated on a frozen 1M-row CSE-CIC-IDS2018 slice
+with deterministic, post-hoc-label methodology (see
+`docs/slice-13b-cse-cic-ids2018-evaluation.md`). What the detectors have and
+have not demonstrated is recorded in `docs/detection-operating-envelope.md`
+— including the single-campaign limitation. Broader validation across attack
+families is a requirement, not a follow-up wish: see
+`docs/multi-attack-validation-plan.md`.
 These will be built incrementally in later steps.
