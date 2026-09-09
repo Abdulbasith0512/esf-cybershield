@@ -1,0 +1,48 @@
+# Render Blueprint for ESF CyberShield (portfolio demo deployment).
+#
+# Intended sequence (Render execution still pending — see backend/README.md):
+#   1. Create/attach: deploy esf-backend with the /data persistent disk.
+#   2. Confirm backend /health.
+#   3. One-off shell on the backend service: `alembic upgrade head`.
+#   4. Same shell: `python /srv/seed/scripts/seed_demo.py`.
+#   5. Replace https://<backend-render-url> below with the real backend URL,
+#      then deploy esf-frontend (NEXT_PUBLIC_* is baked at BUILD time, so the
+#      frontend image rebuilds when this value changes).
+#   6. Replace https://<frontend-render-url> below with the real frontend URL
+#      (backend restart picks it up; no rebuild needed for CORS_ORIGINS).
+#
+# Notes:
+# - No secrets in this file. Set sensitive values (if any) in the Dashboard.
+# - No plan/tier fields: Render defaults apply; confirm the plan supports
+#   persistent disks before relying on SQLite persistence.
+# - Backend dockerContext is the repository root because the image carries
+#   the minimal demo-seed assets alongside app code (see backend/Dockerfile
+#   and root .dockerignore). Frontend context stays ./frontend.
+
+services:
+  - type: web
+    name: esf-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    disk:
+      name: esf-sqlite
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////data/esf.db
+      - key: APP_ENV
+        value: production
+      - key: CORS_ORIGINS
+        value: https://<frontend-render-url>
+
+  - type: web
+    name: esf-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://<backend-render-url>

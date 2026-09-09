@@ -146,12 +146,24 @@ def test_enrichment_deterministic():
             ns_event("e2", source_ip="10.0.0.5")]
     dets = [ns_det("det-1", ["e1", "e2"])]
     provider = LocalThreatIntelProvider()
+
+    def _stable(enriched):
+        # retrieved_at is wall-clock by design (the injected `now` only
+        # applies when a provider leaves it unset); everything else must be
+        # deterministic, so normalize it out of the comparison.
+        items = []
+        for entry in enriched:
+            dumped = entry.model_dump()
+            if dumped.get("intelligence") is not None:
+                dumped["intelligence"]["retrieved_at"] = None
+            items.append(dumped)
+        return json.dumps(items, sort_keys=True, default=str)
+
     first = enrich_incident("inc-1", rows, dets, provider,
                             cache=ThreatIntelCache(), now=NOW)
     second = enrich_incident("inc-1", rows, dets, provider,
                              cache=ThreatIntelCache(), now=NOW)
-    assert (json.dumps([e.model_dump() for e in first], sort_keys=True, default=str)
-            == json.dumps([e.model_dump() for e in second], sort_keys=True, default=str))
+    assert _stable(first) == _stable(second)
 
 
 # 12. incident traceability

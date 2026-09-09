@@ -1,0 +1,57 @@
+# Backend image build context is the repository root (see docker-compose.yml).
+# Default-deny: `*` excludes everything; wanted paths are re-included below
+# with every ancestor directory re-included explicitly (required by
+# dockerignore parent-directory semantics). Order matters: broad pins come
+# BEFORE the specific re-includes so nothing dangerous can slip back in.
+*
+
+# --- always out (readability pins; `*` already excludes these)
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+*.db
+*.sqlite3
+node_modules/
+frontend/
+ml/
+
+# --- danger trees: excluded even though their parents reopen below.
+# (Benchmark datasets, extra models, and stray inputs never enter the image.)
+data/public/
+models/ueba/*
+!models/ueba/model.joblib
+data/synthetic/*
+!data/synthetic/sample_demo.jsonl
+scripts/*
+!scripts/seed_demo.py
+
+# --- backend runtime inputs (ancestors reopened explicitly)
+!backend/
+!backend/Dockerfile
+!backend/requirements.txt
+!backend/alembic.ini
+!backend/app/
+!backend/app/**
+!backend/alembic/
+!backend/alembic/**
+
+# --- demo-seed assets ONLY (one-off seeding; never the normal runtime)
+!scripts/
+!scripts/seed_demo.py
+!models/
+!models/ueba/
+!models/ueba/model.joblib
+!data/
+!data/synthetic/
+!data/synthetic/sample_demo.jsonl

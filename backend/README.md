@@ -103,6 +103,27 @@ Via Docker Compose (after `alembic upgrade head`):
 docker compose --profile seed run --rm seed
 ```
 
+The compose seed profile reuses the backend image, which carries the seed
+assets under `/srv/seed/` (script, demo dataset, tracked UEBA model); the
+persistent volume holds the database. No host bind-mounts are required.
+
+## Render deployment (pending validation on Render)
+
+Intended sequence using `render.yaml`:
+
+1. Deploy/create backend `esf-backend` with the persistent `/data` disk.
+2. Confirm backend `/health`.
+3. In a one-off backend shell: `alembic upgrade head`.
+4. In the same shell: `python /srv/seed/scripts/seed_demo.py`.
+5. Deploy/rebuild frontend with
+   `NEXT_PUBLIC_API_BASE_URL=https://<backend-render-url>`
+   (build-time variable: changing it rebuilds the frontend image).
+6. Set backend `CORS_ORIGINS=https://<frontend-render-url>` (no wildcard).
+
+Render execution has not been tested yet; the steps above are the intended
+procedure. `CORS_ORIGINS` stays environment-driven — no Render hostname is
+hardcoded in application source.
+
 Requirements and guarantees:
 
 - `models/ueba/model.joblib` (tracked, ~2 MB) must be readable; training is
