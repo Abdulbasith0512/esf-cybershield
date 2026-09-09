@@ -1,0 +1,16 @@
+# Build context is frontend/; the Dockerfile already copies selectively
+# (package files, then source excluding this list, then build output only).
+# This file is defense in depth.
+.git
+.github
+node_modules/
+.next/
+out/
+coverage/
+.env
+.env.*
+*.local
+npm-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+next-env.d.ts

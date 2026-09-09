@@ -71,6 +71,18 @@ cd backend
 .\.venv\Scripts\python.exe -m alembic downgrade -1
 ```
 
+The app never migrates at startup; schema ownership stays with Alembic.
+For a containerized SQLite deployment, initialize the persistent volume once
+(the volume survives after the one-off container exits):
+
+```powershell
+docker compose run --rm backend alembic upgrade head
+```
+
+This uses `DATABASE_URL=sqlite:////data/esf.db` from `docker-compose.yml`.
+Demo seeding (`data/synthetic/sample_demo.jsonl` workflow) is handled in the
+next deployment step; do not copy benchmark datasets into images.
+
 ## Run / Test
 
 ```powershell

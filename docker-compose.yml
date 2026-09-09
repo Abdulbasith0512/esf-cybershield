@@ -1,7 +1,8 @@
-# ESF CyberShield — Step 1 foundation.
-# Only PostgreSQL (official image) is active so `docker compose config`
-# and `docker compose up` succeed with no missing build contexts.
-# backend / frontend / ml / neo4j / chroma / ollama will be added incrementally.
+# ESF CyberShield — portfolio deployment topology.
+# frontend -> backend -> SQLite on a persistent named volume.
+# PostgreSQL below is retained dormant for a future production profile;
+# the application does not use it (DATABASE_URL points at SQLite).
+# backend / frontend images build from ./backend and ./frontend.
 
 services:
   postgres:
@@ -24,16 +25,50 @@ services:
       timeout: 5s
       retries: 5
 
-  # Planned (Step 2+ — do not uncomment until Dockerfiles exist):
-  # backend:    # build: ./backend, FastAPI on ${BACKEND_PORT:-8000}
-  # frontend:   # build: ./frontend, Vite on ${FRONTEND_PORT:-3000}
+  # Planned (do not uncomment until Dockerfiles exist):
   # ml:         # build: ./ml, batch/inference jobs
   # neo4j:      # image: neo4j:5, attack graph
   # chroma:     # image: chromadb/chroma, vector store
   # ollama:     # image: ollama/ollama, local LLM
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: esf-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/esf.db
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - esf-sqlite:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Build-time only (Next.js inlines NEXT_PUBLIC_* at build).
+        # Override per deployment, e.g. FRONTEND_API_URL=https://api.example.com.
+        NEXT_PUBLIC_API_BASE_URL: ${FRONTEND_API_URL:-http://localhost:8000}
+    container_name: esf-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  esf-sqlite:
 
 networks:
   default:
