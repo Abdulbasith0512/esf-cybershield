@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parent
 
@@ -78,6 +80,22 @@ def test_dockerignore_allowlists_only_seed_inputs():
     for asset in ("sample_demo.jsonl", "model.joblib", "seed_demo.py"):
         hits = [line for line in lines if asset in line]
         assert hits and all(hit.startswith("!") for hit in hits), asset
+
+
+def test_seed_assets_tracked_in_git():
+    """Render builds from a fresh clone: every Dockerfile COPY source must be
+    tracked. Regression test for the missing models/ueba/model.joblib build
+    failure (the file existed locally but was git-ignored)."""
+    import subprocess
+
+    if not (REPO / ".git").exists():
+        pytest.skip("not a git checkout")
+    for source in ("backend/requirements.txt", "backend/alembic.ini",
+                   "scripts/seed_demo.py", "data/synthetic/sample_demo.jsonl",
+                   "models/ueba/model.joblib"):
+        assert (REPO / source).exists(), source
+        subprocess.run(["git", "ls-files", "--error-unmatch", source],
+                       cwd=REPO, check=True, capture_output=True)
 
 
 def _services():

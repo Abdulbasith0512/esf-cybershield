@@ -38,6 +38,9 @@ models/ueba/*
 *.joblib
 *.h5
 *.onnx
+# Exception: the tracked 2 MB UEBA artifact required by scripts/seed_demo.py
+# (deterministic demo seeding). Experimental outputs stay ignored.
+!models/ueba/model.joblib
 
 # ---- Evaluation output (regenerable, never committed) ----
 evaluation/
