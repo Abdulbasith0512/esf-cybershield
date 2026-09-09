@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     threat_intel_provider: str = "local-test"
     threat_intel_timeout_seconds: float = 5.0
     threat_intel_cache_ttl_seconds: int = 3600
+    # SOC Analyst Copilot (Slice 42). "fake" is the offline deterministic
+    # default; "ollama" joins the registry only when ollama_host is set.
+    llm_provider: str = "fake"
+    llm_model: str = ""
+    llm_timeout_seconds: float = 30.0
+    llm_max_output_tokens: int = 1024
+    llm_temperature: float = 0.0
+    llm_max_question_length: int = 2000
+    ollama_host: str = ""
+    ollama_model: str = "llama3.1"
 
 
 @lru_cache

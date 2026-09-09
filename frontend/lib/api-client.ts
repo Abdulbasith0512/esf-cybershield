@@ -5,6 +5,7 @@
 import type {
   CaseActivity,
   CaseNote,
+  CopilotResponse,
   DetectionDetail,
   DetectionFilters,
   DetectionListResponse,
@@ -152,6 +153,14 @@ export function getThreatIntel(incidentId: string, signal?: AbortSignal): Promis
     `/api/v1/incidents/${encodeURIComponent(incidentId)}/threat-intelligence`,
     { signal },
   );
+}
+
+export function askCopilot(incidentId: string, question: string, signal?: AbortSignal): Promise<CopilotResponse> {
+  return request<CopilotResponse>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/copilot`, {
+    signal,
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
 }
 
 export function listDetections(filters: DetectionFilters = {}, signal?: AbortSignal): Promise<DetectionListResponse> {

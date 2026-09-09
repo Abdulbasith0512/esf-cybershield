@@ -23,7 +23,15 @@ from app.schemas.incidents import (
     NoteCreate,
     RecommendationsResponse,
 )
+from app.schemas.copilot import CopilotQuestion, CopilotResponse
 from app.schemas.threatintel import ThreatIntelResponse
+from app.services.copilot import (
+    CopilotUnavailable,
+    InvalidQuestion,
+    OllamaProvider,
+    ask_copilot,
+    provider_registry as copilot_providers,
+)
 from app.services.investigate import EVIDENCE_SAMPLE_LIMIT, build_investigation
 from app.services.persist import cases as case_store
 from app.services.playbooks import recommend
@@ -304,3 +312,64 @@ def get_threat_intelligence(incident_id: str,
                if failed else None),
         observables=enriched,
     )
+
+
+def _copilot_rows(db: Session, incident_id: str):
+    """Shared incident/detection/evidence fetch for copilot + investigation."""
+    incident = db.execute(
+        select(IncidentRow).where(IncidentRow.incident_id == incident_id)
+    ).scalars().first()
+    if incident is None:
+        return None, [], []
+    det_ids = list(incident.detection_ids or [])
+    det_rows = db.execute(
+        select(DetectionRow).where(DetectionRow.detection_id.in_(det_ids))
+    ).scalars().all() if det_ids else []
+    sample_ids = sorted(set(incident.evidence_event_ids or []))[:EVIDENCE_SAMPLE_LIMIT]
+    ev_rows = db.execute(
+        select(SecurityEventRow).where(SecurityEventRow.event_id.in_(sample_ids))
+    ).scalars().all() if sample_ids else []
+    return incident, list(det_rows), list(ev_rows)
+
+
+@router.post("/{incident_id}/copilot", response_model=CopilotResponse,
+             summary="Ask the SOC Analyst Copilot about one incident (advisory)")
+def ask_incident_copilot(incident_id: str, body: CopilotQuestion,
+                         db: Session = Depends(get_db)) -> CopilotResponse:
+    """Grounded Q&A over stored incident context. Read-only: the copilot can
+    never mutate incidents, detections, evidence, risk, or case state."""
+    incident, det_rows, ev_rows = _copilot_rows(db, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    settings = get_settings()
+    det_ids = list(incident.detection_ids or [])
+    investigation = build_investigation(incident, det_rows, ev_rows,
+                                        expected_detection_ids=det_ids)
+    recommendations = recommend(investigation)
+    ti_providers = provider_registry()
+    ti_provider = ti_providers.get(settings.threat_intel_provider)
+    threat_intel = enrich_incident(incident_id, ev_rows, det_rows, ti_provider) \
+        if ti_provider is not None else []
+    name = (settings.llm_provider or "").strip().lower() or "fake"
+    model = settings.llm_model or (settings.ollama_model if name == "ollama" else "fake-v1")
+    registry = copilot_providers(
+        host=settings.ollama_host if name == OllamaProvider.name else "", model=model)
+    provider = registry.get(name)
+    if provider is None:
+        raise HTTPException(
+            status_code=503, detail=f"assistant provider '{name}' is not configured")
+    try:
+        return ask_copilot(
+            incident_id, body.question, investigation, threat_intel, recommendations,
+            provider,
+            history=[turn.model_dump() for turn in body.history],
+            max_question_length=settings.llm_max_question_length,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_output_tokens=settings.llm_max_output_tokens,
+            temperature=settings.llm_temperature)
+    except InvalidQuestion as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except CopilotUnavailable as exc:
+        logger.warning("copilot unavailable: provider=%s error=%s",
+                       provider.name, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="assistant unavailable")

@@ -380,3 +380,25 @@ export interface ThreatIntelResponse {
   error: string | null;
   observables: EnrichedObservable[];
 }
+
+export interface CopilotCitation {
+  type: string;
+  id: string;
+  label: string;
+}
+
+export interface CopilotResponse {
+  incident_id: string;
+  question: string;
+  answer: string;
+  citations: CopilotCitation[];
+  grounded: boolean;
+  available: boolean;
+  provider: string;
+  model: string;
+  generated_at: string;
+  dropped_citations: number;
+  usage: { input_tokens: number | null; output_tokens: number | null } | null;
+  error: string | null;
+  metadata: Record<string, unknown>;
+}

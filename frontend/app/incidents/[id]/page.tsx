@@ -19,6 +19,7 @@ import { InvestigationTimeline } from "@/components/incidents/investigation-time
 import { EvidenceSection } from "@/components/incidents/evidence-section";
 import { RiskBreakdownView } from "@/components/incidents/risk-breakdown";
 import { RecommendationsList } from "@/components/incidents/recommendations-section";
+import { CopilotSection } from "@/components/incidents/copilot-section";
 import { ThreatIntelList } from "@/components/incidents/threat-intel-section";
 import { UebaObservations } from "@/components/incidents/ueba-observations";
 import { IncidentContext } from "@/components/incidents/incident-context";
@@ -243,6 +244,19 @@ export function IncidentDetailView({ id }: { id: string }) {
             ) : (
               <RecommendationsList recommendations={recommendations.data.recommendations} />
             )}
+          </Card>
+
+          <Card title="SOC Analyst Copilot">
+            <CopilotSection
+              incidentId={data.incident_id}
+              evidenceByDetection={Object.fromEntries(
+                (investigation.data?.detections ?? []).map((d) => [
+                  d.detection_id,
+                  d.evidence_event_ids,
+                ]),
+              )}
+              onFocusEvidence={(ids) => setFocusIds(ids)}
+            />
           </Card>
 
           <Card title={`Evidence events (${data.evidence_event_ids.length})`}>
