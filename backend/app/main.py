@@ -25,7 +25,9 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        # GET/POST reads + writes, PATCH for case management (status/assignee).
+        # No PUT/DELETE: unused by the API.
+        allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["*"],
     )
 

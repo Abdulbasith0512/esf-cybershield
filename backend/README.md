@@ -55,7 +55,7 @@ copy ..\.env.example ..\.env
 
 | Var | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg://esf:changeme@localhost:5432/esf` | Postgres (prod) or `sqlite:///...` (offline/tests) |
+| `DATABASE_URL` | `postgresql+psycopg://esf:changeme@localhost:5432/esf` | Postgres (prod) or `sqlite:///...` (offline/tests). Deployment with SQLite must use an absolute persistent path, e.g. `sqlite:////data/esf.db`; the app never creates schema at startup, so initialize a fresh database once with `alembic upgrade head` (see Migrate). |
 | `INGEST_API_KEY` | empty (open) | Require X-API-Key on POST when set |
 | `MAX_BATCH_SIZE` | 500 | Batch bound |
 | `MAX_PAGE_SIZE` | 500 | `page_size` bound |
