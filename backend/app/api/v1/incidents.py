@@ -9,8 +9,16 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import get_db
+from app.db.models.detection import Detection as DetectionRow
 from app.db.models.incident import Incident as IncidentRow
-from app.schemas.incidents import IncidentListResponse, IncidentResponse, IncidentSummary
+from app.db.models.security_event import SecurityEvent as SecurityEventRow
+from app.schemas.incidents import (
+    IncidentListResponse,
+    IncidentResponse,
+    IncidentSummary,
+    InvestigationResponse,
+)
+from app.services.investigate import EVIDENCE_SAMPLE_LIMIT, build_investigation
 
 logger = logging.getLogger("esf.api")
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
@@ -118,3 +126,23 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)) -> IncidentRes
     if row is None:
         raise HTTPException(status_code=404, detail="incident not found")
     return _to_response(row)
+
+
+@router.get("/{incident_id}/investigation", response_model=InvestigationResponse,
+            summary="Get the SOC investigation view for one incident")
+def get_investigation(incident_id: str, db: Session = Depends(get_db)) -> InvestigationResponse:
+    incident = db.execute(
+        select(IncidentRow).where(IncidentRow.incident_id == incident_id)
+    ).scalars().first()
+    if incident is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    det_ids = list(incident.detection_ids or [])
+    det_rows = db.execute(
+        select(DetectionRow).where(DetectionRow.detection_id.in_(det_ids))
+    ).scalars().all() if det_ids else []
+    sample_ids = sorted(set(incident.evidence_event_ids or []))[:EVIDENCE_SAMPLE_LIMIT]
+    ev_rows = db.execute(
+        select(SecurityEventRow).where(SecurityEventRow.event_id.in_(sample_ids))
+    ).scalars().all() if sample_ids else []
+    return build_investigation(incident, list(det_rows), list(ev_rows),
+                                 expected_detection_ids=det_ids)

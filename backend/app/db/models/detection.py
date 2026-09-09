@@ -40,6 +40,12 @@ class Detection(Base):
     evidence_event_ids: Mapped[list] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list
     )
+    # Complete qualifying bucket membership (Slice 13E+). Absent ([]) for rows
+    # persisted before bucket capture; investigation treats those as unknown,
+    # never as empty evidence.
+    bucket_event_ids: Mapped[list] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list
+    )
     detection_metadata: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=dict
     )

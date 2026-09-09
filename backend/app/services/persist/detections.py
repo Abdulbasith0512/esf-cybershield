@@ -39,6 +39,7 @@ def _payload(det: DetectionResult) -> dict[str, Any]:
         "confidence": det.confidence,
         "reason": det.reason,
         "evidence_event_ids": sorted(set(det.evidence_event_ids)),
+        "bucket_event_ids": sorted(set(det.bucket_event_ids)),
         "detection_metadata": dict(det.metadata or {}),
         "first_seen": _naive_utc(det.first_seen),
         "last_seen": _naive_utc(det.last_seen),

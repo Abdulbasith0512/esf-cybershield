@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { use, useState } from "react";
-import { ApiError, getIncident } from "@/lib/api-client";
+import { ApiError, getIncident, getInvestigation } from "@/lib/api-client";
 import { useApi } from "@/lib/use-api";
 import { useIncidentEvidence } from "@/lib/use-incident-evidence";
 import { useIncidentDetections } from "@/lib/use-incident-detections";
 import { DetectionCards } from "@/components/incidents/detection-cards";
+import { EntitySummary } from "@/components/incidents/entity-summary";
+import { ExplanationCard } from "@/components/incidents/explanation-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SeverityBadge } from "@/components/ui/badge";
@@ -61,7 +63,13 @@ export function IncidentDetailView({ id }: { id: string }) {
   );
   const evidence = useIncidentEvidence(data ? data.evidence_event_ids : null);
   const detections = useIncidentDetections(data ? data.detection_ids : null);
+  const investigation = useApi(`investigation:${id}`, (signal) =>
+    getInvestigation(decodeURIComponent(id), signal),
+  );
   const [focusIds, setFocusIds] = useState<string[] | null>(null);
+  const bucketTotal = investigation.data
+    ? investigation.data.detections.reduce((n, d) => n + d.bucket_event_ids.length, 0)
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -108,6 +116,7 @@ export function IncidentDetailView({ id }: { id: string }) {
               ],
               ["Detections", String(data.detection_ids.length)],
               ["Evidence events", String(data.evidence_event_ids.length)],
+              ["Bucket events", bucketTotal === null ? "—" : String(bucketTotal)],
             ].map(([label, value]) => (
               <div key={label} className="rounded-md border border-soc-border bg-soc-panel p-3">
                 <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
@@ -118,6 +127,26 @@ export function IncidentDetailView({ id }: { id: string }) {
 
           <Card title="Investigation summary">
             <p className="text-sm leading-relaxed text-soc-text">{data.reason}</p>
+          </Card>
+
+          <Card title="Why this incident exists">
+            {investigation.loading ? (
+              <LoadingState message="Loading investigation..." />
+            ) : investigation.error || !investigation.data ? (
+              <ErrorState message="Unable to load investigation." onRetry={investigation.refresh} />
+            ) : (
+              <ExplanationCard explanation={investigation.data.explanation} />
+            )}
+          </Card>
+
+          <Card title="Entities">
+            {investigation.loading ? (
+              <LoadingState message="Loading investigation..." />
+            ) : investigation.error || !investigation.data ? (
+              <ErrorState message="Unable to load investigation." onRetry={investigation.refresh} />
+            ) : (
+              <EntitySummary entities={investigation.data.entities} />
+            )}
           </Card>
 
           <Card title="Attack story">

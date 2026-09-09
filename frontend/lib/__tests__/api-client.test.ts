@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { ApiError, getEvent, getHealth, getIncident, listEvents, listIncidents } from "@/lib/api-client";
+import { ApiError, getEvent, getHealth, getIncident, getInvestigation, listEvents, listIncidents } from "@/lib/api-client";
 
 const BASE = "http://localhost:8000";
 
@@ -73,5 +73,13 @@ describe("api-client", () => {
     const err = await getIncident("nope").catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(404);
+  });
+
+  it("fetches the investigation view from the nested endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ incident: { incident_id: "abc" } }));
+    const res = await getInvestigation("abc");
+    expect((res as { incident: { incident_id: string } }).incident.incident_id).toBe("abc");
+    const url = vi.mocked(fetch).mock.calls[0][0] as string;
+    expect(url).toBe(`${BASE}/api/v1/incidents/abc/investigation`);
   });
 });

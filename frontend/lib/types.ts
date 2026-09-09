@@ -181,3 +181,93 @@ export interface DetectionFilters {
   start_time?: string;
   end_time?: string;
 }
+
+export interface InvestigationTimelineEntry {
+  detection_id: string;
+  rule_id: string;
+  rule_name: string;
+  severity: string;
+  confidence: number;
+  first_seen: string;
+  last_seen: string;
+  evidence_count: number;
+  bucket_count: number;
+  bucket_available: boolean;
+  mitre_technique_ids: string[];
+}
+
+export interface InvestigationEntities {
+  source_ips: string[];
+  destination_ips: string[];
+  ports: number[];
+  protocols: string[];
+  users: string[];
+  hosts: string[];
+  processes: string[];
+}
+
+export interface InvestigationDetection {
+  detection_id: string;
+  rule_id: string;
+  rule_name: string;
+  severity: string;
+  confidence: number;
+  reason: string;
+  fingerprint: string;
+  first_seen: string;
+  last_seen: string;
+  evidence_event_ids: string[];
+  bucket_event_ids: string[];
+  bucket_available: boolean;
+  mitre_technique_ids: string[];
+}
+
+export interface InvestigationRiskFactor {
+  factor: string;
+  points: number;
+}
+
+export interface InvestigationExplanation {
+  summary: string;
+  trigger_detections: string[];
+  correlation_reason: string;
+  risk_factors: InvestigationRiskFactor[];
+  mitre_context: { technique_id: string; rule_ids: string[] }[];
+  ueba_context: Record<string, unknown>;
+  unavailable: string[];
+}
+
+export interface Investigation {
+  incident: {
+    incident_id: string;
+    title: string;
+    severity: string;
+    status: string;
+    confidence: number;
+    risk_score: number;
+    risk_band: string;
+    risk_explanation: string;
+    first_seen: string;
+    last_seen: string;
+    created_at: string;
+    updated_at: string;
+    detection_count: number;
+    evidence_count: number;
+  };
+  explanation: InvestigationExplanation;
+  timeline: InvestigationTimelineEntry[];
+  entities: InvestigationEntities;
+  detections: InvestigationDetection[];
+  evidence_sample: Record<string, unknown>[];
+  evidence_total: number;
+  mitre_techniques: MitreMapping[];
+  ueba: Record<string, unknown>;
+  risk: {
+    score: number;
+    band: string;
+    explanation: string;
+    breakdown: Record<string, unknown>;
+    factors: InvestigationRiskFactor[];
+  };
+  missing_detections: string[];
+}
