@@ -132,7 +132,7 @@ def test_score_range_and_id_stability():
 
 def test_status_enum():
     dets = [devt("AUTH-001", start_min=0)]
-    assert corr(dets)[0].status == "OPEN"
+    assert corr(dets)[0].status == "NEW"
     with pytest.raises(Exception):
         Incident(**corr(dets)[0].model_dump() | {"status": "BOGUS"})
 

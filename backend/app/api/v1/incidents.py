@@ -13,12 +13,17 @@ from app.db.models.detection import Detection as DetectionRow
 from app.db.models.incident import Incident as IncidentRow
 from app.db.models.security_event import SecurityEvent as SecurityEventRow
 from app.schemas.incidents import (
+    CaseUpdate,
+    IncidentActivityResponse,
     IncidentListResponse,
+    IncidentNoteResponse,
     IncidentResponse,
     IncidentSummary,
     InvestigationResponse,
+    NoteCreate,
 )
 from app.services.investigate import EVIDENCE_SAMPLE_LIMIT, build_investigation
+from app.services.persist import cases as case_store
 
 logger = logging.getLogger("esf.api")
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
@@ -60,6 +65,8 @@ def _to_response(row: IncidentRow) -> IncidentResponse:
         mitre_techniques=list(row.mitre_techniques or []),
         risk_breakdown=row.risk_breakdown or None,
         ueba_evidence=row.ueba_evidence or None,
+        assignee=row.assignee,
+        assigned_at=_aware(row.assigned_at) if row.assigned_at else None,
         created_at=_aware(row.created_at), updated_at=_aware(row.updated_at),
     )
 
@@ -144,5 +151,83 @@ def get_investigation(incident_id: str, db: Session = Depends(get_db)) -> Invest
     ev_rows = db.execute(
         select(SecurityEventRow).where(SecurityEventRow.event_id.in_(sample_ids))
     ).scalars().all() if sample_ids else []
-    return build_investigation(incident, list(det_rows), list(ev_rows),
-                                 expected_detection_ids=det_ids)
+    investigation = build_investigation(incident, list(det_rows), list(ev_rows),
+                                        expected_detection_ids=det_ids)
+    from app.services.case import allowed_transitions
+
+    notes = case_store.list_notes(db, incident_id)
+    activity = case_store.list_activity(db, incident_id)
+    investigation["case"] = {
+        "status": incident.status,
+        "assignee": incident.assignee,
+        "assigned_at": _aware(incident.assigned_at) if incident.assigned_at else None,
+        "allowed_transitions": allowed_transitions(incident.status),
+        "notes": [{"note_id": n.note_id, "author": n.author, "body": n.body,
+                   "created_at": _aware(n.created_at)} for n in notes],
+        "activity": [{"activity_id": a.activity_id, "action": a.action, "actor": a.actor,
+                      "created_at": _aware(a.created_at),
+                      "metadata": dict(a.activity_metadata or {})} for a in activity],
+    }
+    return investigation
+
+
+def _to_note(row) -> IncidentNoteResponse:
+    return IncidentNoteResponse(
+        note_id=row.note_id, incident_id=row.incident_id, author=row.author,
+        body=row.body, created_at=_aware(row.created_at),
+    )
+
+
+def _to_activity(row) -> IncidentActivityResponse:
+    return IncidentActivityResponse(
+        activity_id=row.activity_id, incident_id=row.incident_id, action=row.action,
+        actor=row.actor, created_at=_aware(row.created_at),
+        metadata=dict(row.activity_metadata or {}),
+    )
+
+
+@router.patch("/{incident_id}", response_model=IncidentResponse,
+              summary="Update incident case fields (status, assignee)")
+def update_case(incident_id: str, body: CaseUpdate,
+                db: Session = Depends(get_db)) -> IncidentResponse:
+    try:
+        kwargs: dict = {"actor": body.actor}
+        if body.has_status:
+            kwargs["status"] = body.status
+        if body.has_assignee:
+            kwargs["assignee"] = body.assignee
+        row = case_store.update_case(db, incident_id, **kwargs)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="incident not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _to_response(row)
+
+
+@router.get("/{incident_id}/notes", response_model=list[IncidentNoteResponse],
+            summary="List incident analyst notes in deterministic order")
+def list_notes(incident_id: str, db: Session = Depends(get_db)) -> list[IncidentNoteResponse]:
+    if case_store.get_incident(db, incident_id) is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    return [_to_note(row) for row in case_store.list_notes(db, incident_id)]
+
+
+@router.post("/{incident_id}/notes", response_model=IncidentNoteResponse, status_code=201,
+             summary="Append an analyst note to an incident")
+def create_note(incident_id: str, body: NoteCreate,
+                db: Session = Depends(get_db)) -> IncidentNoteResponse:
+    try:
+        row = case_store.add_note(db, incident_id, body=body.body, author=body.author)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="incident not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return _to_note(row)
+
+
+@router.get("/{incident_id}/activity", response_model=list[IncidentActivityResponse],
+            summary="List incident activity history in deterministic order")
+def list_activity(incident_id: str, db: Session = Depends(get_db)) -> list[IncidentActivityResponse]:
+    if case_store.get_incident(db, incident_id) is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    return [_to_activity(row) for row in case_store.list_activity(db, incident_id)]

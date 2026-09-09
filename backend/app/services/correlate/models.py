@@ -7,7 +7,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 Severity = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-Status = Literal["OPEN", "INVESTIGATING", "RESOLVED"]
+# Case-management lifecycle (Slice 38). Fresh incidents enter as NEW;
+# transitions are validated by services.case (NEW->INVESTIGATING->
+# CONTAINED/RESOLVED, with CONTAINED->INVESTIGATING/RESOLVED allowed).
+Status = Literal["NEW", "INVESTIGATING", "CONTAINED", "RESOLVED"]
 NAMESPACE = uuid.UUID("3f6b2c8d-9a1e-5d4b-8c7f-2e5a9d3c6b11")
 
 
@@ -17,7 +20,7 @@ class Incident(BaseModel):
     incident_id: str
     title: str
     severity: Severity
-    status: Status = "OPEN"
+    status: Status = "NEW"
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
     detection_ids: list[str] = Field(min_length=1)

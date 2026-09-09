@@ -3,6 +3,8 @@
  */
 
 import type {
+  CaseActivity,
+  CaseNote,
   DetectionDetail,
   DetectionFilters,
   DetectionListResponse,
@@ -102,6 +104,38 @@ export function getIncident(incidentId: string, signal?: AbortSignal): Promise<I
 
 export function getInvestigation(incidentId: string, signal?: AbortSignal): Promise<Investigation> {
   return request<Investigation>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/investigation`, { signal });
+}
+
+export function updateIncidentCase(
+  incidentId: string,
+  body: { status?: string | null; assignee?: string | null; actor?: string | null },
+  signal?: AbortSignal,
+): Promise<IncidentDetail> {
+  return request<IncidentDetail>(`/api/v1/incidents/${encodeURIComponent(incidentId)}`, {
+    signal,
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listIncidentNotes(incidentId: string, signal?: AbortSignal): Promise<CaseNote[]> {
+  return request<CaseNote[]>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/notes`, { signal });
+}
+
+export function createIncidentNote(
+  incidentId: string,
+  body: { body: string; author?: string | null },
+  signal?: AbortSignal,
+): Promise<CaseNote> {
+  return request<CaseNote>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/notes`, {
+    signal,
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listIncidentActivity(incidentId: string, signal?: AbortSignal): Promise<CaseActivity[]> {
+  return request<CaseActivity[]>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/activity`, { signal });
 }
 
 export function listDetections(filters: DetectionFilters = {}, signal?: AbortSignal): Promise<DetectionListResponse> {

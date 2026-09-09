@@ -234,7 +234,7 @@ def test_api_filters(client):
     assert client.get("/api/v1/incidents", params={"severity": sev.lower()}).json()["total"] >= 1
     band = items[0].enriched.risk_band
     assert client.get("/api/v1/incidents", params={"risk_band": band}).json()["total"] >= 1
-    assert client.get("/api/v1/incidents", params={"status": "open"}).json()["total"] == 4
+    assert client.get("/api/v1/incidents", params={"status": "new"}).json()["total"] == 4
     top = max(i.enriched.risk_score for i in items)
     assert client.get("/api/v1/incidents", params={"min_risk_score": top}).json()["total"] >= 1
     assert client.get("/api/v1/incidents", params={"min_risk_score": 101}).status_code == 422

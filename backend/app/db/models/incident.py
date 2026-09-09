@@ -34,7 +34,11 @@ class Incident(Base):
     incident_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="OPEN")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="NEW")
+    assignee: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    assigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
     risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

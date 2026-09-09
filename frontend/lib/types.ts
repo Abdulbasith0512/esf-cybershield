@@ -123,6 +123,8 @@ export interface IncidentDetail extends Omit<IncidentSummary, "ueba_available" |
   mitre_techniques: MitreMapping[];
   risk_breakdown: RiskBreakdown | null;
   ueba_evidence: UebaIncidentEvidence | null;
+  assignee?: string | null;
+  assigned_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -270,4 +272,46 @@ export interface Investigation {
     factors: InvestigationRiskFactor[];
   };
   missing_detections: string[];
+  case: InvestigationCase | null;
+}
+
+export interface InvestigationCaseNote {
+  note_id: string;
+  author: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface InvestigationCaseActivity {
+  activity_id: string;
+  action: string;
+  actor: string | null;
+  created_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface InvestigationCase {
+  status: string;
+  assignee: string | null;
+  assigned_at: string | null;
+  allowed_transitions: string[];
+  notes: InvestigationCaseNote[];
+  activity: InvestigationCaseActivity[];
+}
+
+export interface CaseNote {
+  note_id: string;
+  incident_id: string;
+  author: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface CaseActivity {
+  activity_id: string;
+  incident_id: string;
+  action: string;
+  actor: string | null;
+  created_at: string;
+  metadata: Record<string, unknown>;
 }

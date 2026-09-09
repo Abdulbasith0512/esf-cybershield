@@ -31,6 +31,8 @@ class IncidentResponse(BaseModel):
     mitre_techniques: list[MitreMapping] = Field(default_factory=list)
     risk_breakdown: RiskBreakdown | None = None
     ueba_evidence: UEBAIncidentEvidence | None = None
+    assignee: str | None = None
+    assigned_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -60,6 +62,48 @@ class IncidentListResponse(BaseModel):
     page_size: int
     total: int
     pages: int
+
+
+class CaseUpdate(BaseModel):
+    """Controlled mutation: omitted fields untouched, null assignee unassigns."""
+
+    model_config = {"extra": "forbid"}
+
+    status: str | None = None
+    assignee: str | None = None
+    actor: str | None = None
+
+    @property
+    def has_status(self) -> bool:
+        return "status" in self.model_fields_set
+
+    @property
+    def has_assignee(self) -> bool:
+        return "assignee" in self.model_fields_set
+
+
+class NoteCreate(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    body: str
+    author: str | None = None
+
+
+class IncidentNoteResponse(BaseModel):
+    note_id: str
+    incident_id: str
+    author: str | None = None
+    body: str
+    created_at: datetime
+
+
+class IncidentActivityResponse(BaseModel):
+    activity_id: str
+    incident_id: str
+    action: str
+    actor: str | None = None
+    created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class TimelineEntry(BaseModel):
@@ -147,6 +191,30 @@ class InvestigationRisk(BaseModel):
     factors: list[RiskFactor] = Field(default_factory=list)
 
 
+class InvestigationCaseNote(BaseModel):
+    note_id: str
+    author: str | None = None
+    body: str
+    created_at: datetime
+
+
+class InvestigationCaseActivity(BaseModel):
+    activity_id: str
+    action: str
+    actor: str | None = None
+    created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class InvestigationCase(BaseModel):
+    status: str
+    assignee: str | None = None
+    assigned_at: datetime | None = None
+    allowed_transitions: list[str] = Field(default_factory=list)
+    notes: list[InvestigationCaseNote] = Field(default_factory=list)
+    activity: list[InvestigationCaseActivity] = Field(default_factory=list)
+
+
 class InvestigationResponse(BaseModel):
     incident: InvestigationIncident
     explanation: InvestigationExplanation
@@ -159,3 +227,4 @@ class InvestigationResponse(BaseModel):
     ueba: dict[str, Any] = Field(default_factory=dict)
     risk: InvestigationRisk
     missing_detections: list[str] = Field(default_factory=list)
+    case: InvestigationCase | None = None

@@ -7,6 +7,7 @@ import { useApi } from "@/lib/use-api";
 import { useIncidentEvidence } from "@/lib/use-incident-evidence";
 import { useIncidentDetections } from "@/lib/use-incident-detections";
 import { DetectionCards } from "@/components/incidents/detection-cards";
+import { CaseSection } from "@/components/incidents/case-section";
 import { EntitySummary } from "@/components/incidents/entity-summary";
 import { ExplanationCard } from "@/components/incidents/explanation-card";
 import { Card } from "@/components/ui/card";
@@ -239,6 +240,20 @@ export function IncidentDetailView({ id }: { id: string }) {
 
           <Card title="Technical context">
             <IncidentContext incident={data} />
+          </Card>
+
+          <Card title="Case management">
+            {investigation.loading ? (
+              <LoadingState message="Loading case state..." />
+            ) : investigation.error || !investigation.data ? (
+              <ErrorState message="Unable to load case state." onRetry={investigation.refresh} />
+            ) : (
+              <CaseSection
+                incidentId={data.incident_id}
+                caseState={investigation.data.case}
+                onChanged={investigation.refresh}
+              />
+            )}
           </Card>
 
           <div className="flex justify-end">
