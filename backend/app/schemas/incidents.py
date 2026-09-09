@@ -228,3 +228,27 @@ class InvestigationResponse(BaseModel):
     risk: InvestigationRisk
     missing_detections: list[str] = Field(default_factory=list)
     case: InvestigationCase | None = None
+
+
+class RecommendationEvidenceRefs(BaseModel):
+    detection_ids: list[str] = Field(default_factory=list)
+    detection_count: int = 0
+    evidence_event_ids: list[str] = Field(default_factory=list)
+    evidence_count: int = 0
+    technique_id: str | None = None
+
+
+class Recommendation(BaseModel):
+    id: str
+    priority: str
+    category: str
+    title: str
+    reason: str
+    actions: list[str] = Field(default_factory=list)
+    evidence_refs: RecommendationEvidenceRefs = Field(
+        default_factory=RecommendationEvidenceRefs)
+
+
+class RecommendationsResponse(BaseModel):
+    incident_id: str
+    recommendations: list[Recommendation] = Field(default_factory=list)

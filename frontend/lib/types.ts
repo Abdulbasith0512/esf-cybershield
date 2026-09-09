@@ -315,3 +315,26 @@ export interface CaseActivity {
   created_at: string;
   metadata: Record<string, unknown>;
 }
+
+export interface RecommendationEvidenceRefs {
+  detection_ids: string[];
+  detection_count: number;
+  evidence_event_ids: string[];
+  evidence_count: number;
+  technique_id?: string | null;
+}
+
+export interface Recommendation {
+  id: string;
+  priority: string;
+  category: string;
+  title: string;
+  reason: string;
+  actions: string[];
+  evidence_refs: RecommendationEvidenceRefs;
+}
+
+export interface RecommendationsResponse {
+  incident_id: string;
+  recommendations: Recommendation[];
+}

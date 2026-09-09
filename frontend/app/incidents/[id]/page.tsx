@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useState } from "react";
-import { ApiError, getIncident, getInvestigation } from "@/lib/api-client";
+import { ApiError, getIncident, getInvestigation, getRecommendations } from "@/lib/api-client";
 import { useApi } from "@/lib/use-api";
 import { useIncidentEvidence } from "@/lib/use-incident-evidence";
 import { useIncidentDetections } from "@/lib/use-incident-detections";
@@ -18,6 +18,7 @@ import { formatTime } from "@/components/dashboard/events-table";
 import { InvestigationTimeline } from "@/components/incidents/investigation-timeline";
 import { EvidenceSection } from "@/components/incidents/evidence-section";
 import { RiskBreakdownView } from "@/components/incidents/risk-breakdown";
+import { RecommendationsList } from "@/components/incidents/recommendations-section";
 import { UebaObservations } from "@/components/incidents/ueba-observations";
 import { IncidentContext } from "@/components/incidents/incident-context";
 import { AttackStory } from "@/components/incidents/attack-story";
@@ -66,6 +67,9 @@ export function IncidentDetailView({ id }: { id: string }) {
   const detections = useIncidentDetections(data ? data.detection_ids : null);
   const investigation = useApi(`investigation:${id}`, (signal) =>
     getInvestigation(decodeURIComponent(id), signal),
+  );
+  const recommendations = useApi(`recommendations:${id}`, (signal) =>
+    getRecommendations(decodeURIComponent(id), signal),
   );
   const [focusIds, setFocusIds] = useState<string[] | null>(null);
   const bucketTotal = investigation.data
@@ -215,6 +219,16 @@ export function IncidentDetailView({ id }: { id: string }) {
 
           <Card title={`Risk breakdown`}>
             <RiskBreakdownView breakdown={data.risk_breakdown} explanation={data.risk_explanation} />
+          </Card>
+
+          <Card title="Recommended actions">
+            {recommendations.loading ? (
+              <LoadingState message="Loading recommendations..." />
+            ) : recommendations.error || !recommendations.data ? (
+              <ErrorState message="Unable to load recommendations." onRetry={recommendations.refresh} />
+            ) : (
+              <RecommendationsList recommendations={recommendations.data.recommendations} />
+            )}
           </Card>
 
           <Card title={`Evidence events (${data.evidence_event_ids.length})`}>

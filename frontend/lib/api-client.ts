@@ -15,6 +15,7 @@ import type {
   IncidentFilters,
   IncidentListResponse,
   Investigation,
+  RecommendationsResponse,
   SecurityEvent,
 } from "@/lib/types";
 
@@ -136,6 +137,13 @@ export function createIncidentNote(
 
 export function listIncidentActivity(incidentId: string, signal?: AbortSignal): Promise<CaseActivity[]> {
   return request<CaseActivity[]>(`/api/v1/incidents/${encodeURIComponent(incidentId)}/activity`, { signal });
+}
+
+export function getRecommendations(incidentId: string, signal?: AbortSignal): Promise<RecommendationsResponse> {
+  return request<RecommendationsResponse>(
+    `/api/v1/incidents/${encodeURIComponent(incidentId)}/recommendations`,
+    { signal },
+  );
 }
 
 export function listDetections(filters: DetectionFilters = {}, signal?: AbortSignal): Promise<DetectionListResponse> {

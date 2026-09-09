@@ -21,9 +21,11 @@ from app.schemas.incidents import (
     IncidentSummary,
     InvestigationResponse,
     NoteCreate,
+    RecommendationsResponse,
 )
 from app.services.investigate import EVIDENCE_SAMPLE_LIMIT, build_investigation
 from app.services.persist import cases as case_store
+from app.services.playbooks import recommend
 
 logger = logging.getLogger("esf.api")
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
@@ -231,3 +233,27 @@ def list_activity(incident_id: str, db: Session = Depends(get_db)) -> list[Incid
     if case_store.get_incident(db, incident_id) is None:
         raise HTTPException(status_code=404, detail="incident not found")
     return [_to_activity(row) for row in case_store.list_activity(db, incident_id)]
+
+
+@router.get("/{incident_id}/recommendations", response_model=RecommendationsResponse,
+            summary="Get advisory response recommendations for one incident")
+def get_recommendations(incident_id: str,
+                        db: Session = Depends(get_db)) -> RecommendationsResponse:
+    """Advisory playbooks only. Reuses the investigation view; executes nothing."""
+    incident = db.execute(
+        select(IncidentRow).where(IncidentRow.incident_id == incident_id)
+    ).scalars().first()
+    if incident is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    det_ids = list(incident.detection_ids or [])
+    det_rows = db.execute(
+        select(DetectionRow).where(DetectionRow.detection_id.in_(det_ids))
+    ).scalars().all() if det_ids else []
+    sample_ids = sorted(set(incident.evidence_event_ids or []))[:EVIDENCE_SAMPLE_LIMIT]
+    ev_rows = db.execute(
+        select(SecurityEventRow).where(SecurityEventRow.event_id.in_(sample_ids))
+    ).scalars().all() if sample_ids else []
+    investigation = build_investigation(incident, list(det_rows), list(ev_rows),
+                                        expected_detection_ids=det_ids)
+    return RecommendationsResponse(
+        incident_id=incident_id, recommendations=recommend(investigation))
