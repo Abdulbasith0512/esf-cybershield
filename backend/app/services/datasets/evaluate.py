@@ -822,10 +822,15 @@ def build_summary(run_id: str, files: list[str], params: dict, stats: dict,
     }
 
 
-def render_markdown(summary: dict) -> str:
+def render_markdown(summary: dict, title: str = "CSE-CIC-IDS2018 Flow Detection Evaluation",
+                    bucket_note: str | None = None) -> str:
     """Human-readable report. Machine-readable form is summary.json."""
+    if bucket_note is None:
+        bucket_note = ("The fixed 1M slice contains one non-benign attack\n"
+                       "label, so bucket recall is binary there; this is a property of the slice,\n"
+                       "not of CSE-CIC-IDS2018 generally.")
     lines = [
-        "# CSE-CIC-IDS2018 Flow Detection Evaluation",
+        f"# {title}",
         "",
         f"run_id: `{summary['run_id']}`",
         f"files: {', '.join(summary['files'])}",
@@ -874,9 +879,7 @@ def render_markdown(summary: dict) -> str:
         "complete label-free contributor set). Bucket precision asks whether a",
         "detection bucket intersects attack activity; bucket recall asks whether",
         "each post-hoc label-defined attack episode was hit. Labels are resolved",
-        "only after detection. The fixed 1M slice contains one non-benign attack",
-        "label, so bucket recall is binary there; this is a property of the slice,",
-        "not of CSE-CIC-IDS2018 generally. Bucket metrics complement rather than",
+        "only after detection. " + bucket_note + " Bucket metrics complement rather than\n"
         "replace evidence-level metrics.",
         "",
     ]
