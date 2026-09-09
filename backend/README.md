@@ -127,14 +127,43 @@ hardcoded in application source.
 Requirements and guarantees:
 
 - `models/ueba/model.joblib` (tracked, ~2 MB) must be readable; training is
-  out of scope, nothing is downloaded, no network is used. Compose
-  bind-mounts it read-only; the production backend image does not contain it
-  (the running API never loads the model file).
+  out of scope, nothing is downloaded, no network is used. The backend image
+  carries it under `/srv/seed/` for one-off seeding; the running API never
+  loads the model file.
 - Idempotent: re-running changes nothing and reports
   `demo data already seeded / nothing to do`. Deterministic IDs come from the
   existing pipeline (event IDs, UUIDv5 detections, correlation IDs).
 - Never runs migrations, drops, or deletes; fails clearly when
   `DATABASE_URL` is unset or the schema is not migrated.
+
+## PostgreSQL deployment ($0 Render variant)
+
+Local development stays on SQLite. The same code runs on PostgreSQL by
+selecting `DATABASE_URL` — models use portable types
+(`JSONB`/`JSON` variant, `Uuid`, timezone-aware `DateTime`), migrations
+0001–0004 render valid PostgreSQL DDL, and the seed workflow is
+database-agnostic. PostgreSQL sessions are pinned to UTC so the established
+naive-UTC storage convention holds regardless of server timezone.
+
+`render.yaml` is intentionally left on the SQLite topology; `DATABASE_URL`
+is a secret-equivalent value, so for the PostgreSQL variant set it in the
+Render Dashboard (do not commit it anywhere):
+
+1. Create the Render PostgreSQL database (free tier).
+2. Create the backend Web Service from `render.yaml` (no disk needed).
+3. Set backend `DATABASE_URL` from the Render PostgreSQL connection details
+   (`postgresql+psycopg://USER:PASSWORD@HOST:5432/DATABASE`).
+4. Deploy the backend.
+5. One-off backend shell: `alembic upgrade head`.
+6. Same shell: `python /srv/seed/scripts/seed_demo.py`
+   (expect 200 events / 20 detections / 12 incidents).
+7. Verify `GET /health` and `GET /api/v1/incidents`.
+8. Deploy the frontend with `NEXT_PUBLIC_API_BASE_URL=<backend URL>`.
+9. Set backend `CORS_ORIGINS=<frontend URL>`.
+
+Render execution has not been tested (no Render access from this machine);
+the steps above are the intended procedure. Local SQLite behavior is
+unchanged: `SQLite -> migrate -> seed -> API` keeps working exactly as before.
 
 ## Run / Test
 
