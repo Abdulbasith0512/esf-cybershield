@@ -1,6 +1,7 @@
 """Slice 38 tests: incident case management. No PG needed."""
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -158,3 +159,32 @@ def test_incident_response_carries_assignee(client, db):
     assert client.get(f"/api/v1/incidents/{iid}").json()["assignee"] is None
     client.patch(f"/api/v1/incidents/{iid}", json={"assignee": "on-call"})
     assert client.get(f"/api/v1/incidents/{iid}").json()["assignee"] == "on-call"
+
+
+class _FrozenDateTime(datetime):
+    """Wall clock stuck at one tick: every created_at default ties."""
+
+    @classmethod
+    def utcnow(cls):
+        return cls(2026, 1, 1, 12, 0, 0)
+
+
+def test_activity_order_stable_when_timestamps_tie(client, db, monkeypatch):
+    """Regression: coarse platform clocks tie created_at across rows; the
+    activity listing must still return insertion order, not UUID-tiebreak
+    order. Fails on random tiebreak (~1/720 pass chance for 6 rows)."""
+    monkeypatch.setattr("app.db.models.case.datetime", _FrozenDateTime)
+    iid = seed_incident(client, db)
+    client.patch(f"/api/v1/incidents/{iid}", json={"status": "INVESTIGATING"})
+    client.patch(f"/api/v1/incidents/{iid}", json={"assignee": "analyst-7"})
+    client.post(f"/api/v1/incidents/{iid}/notes", json={"body": "n1"})
+    client.patch(f"/api/v1/incidents/{iid}", json={"assignee": None})
+    client.patch(f"/api/v1/incidents/{iid}", json={"assignee": "analyst-9"})
+    client.post(f"/api/v1/incidents/{iid}/notes", json={"body": "n2"})
+    acts = client.get(f"/api/v1/incidents/{iid}/activity").json()
+    assert [a["action"] for a in acts] == [
+        "STATUS_CHANGED", "ASSIGNED", "NOTE_ADDED",
+        "UNASSIGNED", "ASSIGNED", "NOTE_ADDED",
+    ]
+    stamps = [a["created_at"] for a in acts]
+    assert stamps == sorted(stamps) and len(set(stamps)) == len(stamps)

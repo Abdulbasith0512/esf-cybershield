@@ -5,8 +5,9 @@ never written from this layer. Tables are created via Base.metadata like
 all other models (no migration framework in this project stage).
 """
 
+import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, Index, Text, Uuid
@@ -16,8 +17,26 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.database import Base
 
 
+_last_stamp = datetime.min.replace(tzinfo=None)
+_stamp_lock = threading.Lock()
+
+
 def _utcnow_naive() -> datetime:
-    return datetime.utcnow()
+    """Monotonic naive-UTC clock for case created_at defaults.
+
+    Platform wall clocks can be coarser than the request rate (successive
+    utcnow() calls returning identical values), which used to tie created_at
+    across activity/note rows and leave ORDER BY (created_at, random_id) to
+    a random tiebreak. The guard bumps forward by 1us on ties so insertion
+    order is always recoverable. Real time never moves backwards here.
+    """
+    global _last_stamp
+    with _stamp_lock:
+        now = datetime.utcnow()
+        if now <= _last_stamp:
+            now = _last_stamp + timedelta(microseconds=1)
+        _last_stamp = now
+        return now
 
 
 class IncidentNote(Base):
