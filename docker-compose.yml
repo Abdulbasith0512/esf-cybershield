@@ -66,6 +66,28 @@ services:
       backend:
         condition: service_healthy
 
+  # One-off demo seeding (excluded from `up` by profile). Reuses the backend
+  # image (Python + dependencies only); demo assets are bind-mounted read-only
+  # so the production image stays free of datasets and model files.
+  # Usage: first `docker compose run --rm backend alembic upgrade head`,
+  # then `docker compose --profile seed run --rm seed`.
+  seed:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    profiles: ["seed"]
+    environment:
+      DATABASE_URL: sqlite:////data/esf.db
+      SEED_BACKEND_DIR: /srv/app
+      SEED_DATA_FILE: /seed/data/sample_demo.jsonl
+      SEED_MODEL_FILE: /seed/models/model.joblib
+    volumes:
+      - esf-sqlite:/data
+      - ./scripts:/seed/scripts:ro
+      - ./models/ueba:/seed/models:ro
+      - ./data/synthetic:/seed/data:ro
+    command: ["python", "/seed/scripts/seed_demo.py"]
+
 volumes:
   pgdata:
   esf-sqlite:

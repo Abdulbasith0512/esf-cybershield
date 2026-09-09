@@ -80,8 +80,40 @@ docker compose run --rm backend alembic upgrade head
 ```
 
 This uses `DATABASE_URL=sqlite:////data/esf.db` from `docker-compose.yml`.
-Demo seeding (`data/synthetic/sample_demo.jsonl` workflow) is handled in the
-next deployment step; do not copy benchmark datasets into images.
+Demo seeding is a separate one-off step below; benchmark datasets are never
+used for seeding and are never copied into images.
+
+## Demo seed (deployment)
+
+Populate a freshly migrated database with the small synthetic demo dataset
+(`data/synthetic/sample_demo.jsonl`, 200 events -> 20 detections ->
+12 incidents, plus one guarded demo assignee/note on the top incident).
+The backend never seeds on startup.
+
+From a checkout (SQLite at an absolute persistent path):
+
+```powershell
+$env:DATABASE_URL = 'sqlite:////data/esf.db'
+.\.venv\Scripts\python.exe scripts/seed_demo.py
+```
+
+Via Docker Compose (after `alembic upgrade head`):
+
+```powershell
+docker compose --profile seed run --rm seed
+```
+
+Requirements and guarantees:
+
+- `models/ueba/model.joblib` (tracked, ~2 MB) must be readable; training is
+  out of scope, nothing is downloaded, no network is used. Compose
+  bind-mounts it read-only; the production backend image does not contain it
+  (the running API never loads the model file).
+- Idempotent: re-running changes nothing and reports
+  `demo data already seeded / nothing to do`. Deterministic IDs come from the
+  existing pipeline (event IDs, UUIDv5 detections, correlation IDs).
+- Never runs migrations, drops, or deletes; fails clearly when
+  `DATABASE_URL` is unset or the schema is not migrated.
 
 ## Run / Test
 
