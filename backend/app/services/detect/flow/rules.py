@@ -184,32 +184,77 @@ class PortScan:
                 groups.setdefault(v.source_ip, []).append((v, r))
         window = timedelta(minutes=self.config.scan_window_minutes)
         dense = timedelta(seconds=self.config.scan_density_window_seconds)
+        need = self.config.scan_min_ports
         out = []
         for ip, members in groups.items():
             members.sort(key=lambda t: (t[0].ts, t[0].event_id))
+            # Incremental twin windows over the sorted members. outer holds
+            # the 5-minute search context (port counts + distinct total);
+            # inner holds the dense sub-window (per-port member queues).
+            # Invariants match the previous per-event rebuild exactly: outer
+            # is the maximal suffix ending at `end` within the outer window,
+            # inner the maximal suffix within the density window and outer.
+            outer_counts: Counter = Counter()
+            outer_distinct = 0
+            inner_counts: Counter = Counter()
+            inner_distinct = 0
+            inner_probes = 0
+            queues: dict[int, deque[int]] = {}
+            probe_first: dict[int, bool] = {}
             start = 0
+            low = 0
             for end in range(len(members)):
+                port = members[end][0].destination_port
+                if port is not None:
+                    if outer_counts[port] == 0:
+                        outer_distinct += 1
+                    outer_counts[port] += 1
+                    if inner_counts[port] == 0:
+                        inner_distinct += 1
+                        probe = self._is_probe(members[end][0])
+                        probe_first[port] = probe
+                        if probe:
+                            inner_probes += 1
+                    inner_counts[port] += 1
+                    queues.setdefault(port, deque()).append(end)
                 while members[end][0].ts - members[start][0].ts >= window:
+                    old = members[start][0].destination_port
+                    if old is not None:
+                        outer_counts[old] -= 1
+                        if outer_counts[old] == 0:
+                            outer_distinct -= 1
+                    if low == start and old is not None:
+                        inner_counts[old] -= 1
+                        if inner_counts[old] == 0:
+                            inner_distinct -= 1
+                        queues[old].popleft()
+                        if queues[old]:
+                            new_probe = self._is_probe(members[queues[old][0]][0])
+                            if new_probe != probe_first[old]:
+                                probe_first[old] = new_probe
+                                inner_probes += 1 if new_probe else -1
+                        elif probe_first.pop(old, False):
+                            inner_probes -= 1
+                        low += 1
                     start += 1
-                windowed = members[start:end + 1]
-                by_port: dict[int, tuple[FlowView, dict]] = {}
-                for item in windowed:
-                    port = item[0].destination_port
-                    if port is not None and port not in by_port:
-                        by_port[port] = item
-                if len(by_port) >= self.config.scan_min_ports:
-                    dense_span = self._dense_span(windowed)
-                    if dense_span is None:
-                        continue
-                    by_dense: dict[int, tuple[FlowView, dict]] = {}
-                    for item in dense_span:
-                        port = item[0].destination_port
-                        if port is not None and port not in by_dense:
-                            by_dense[port] = item
-                    probes = sum(1 for view, _ in by_dense.values()
-                                 if self._is_probe(view))
-                    if probes / len(by_dense) <= self.config.scan_unanswered_syn_fraction:
-                        continue
+                while members[end][0].ts - members[low][0].ts >= dense:
+                    drop = members[low][0].destination_port
+                    if drop is not None:
+                        inner_counts[drop] -= 1
+                        if inner_counts[drop] == 0:
+                            inner_distinct -= 1
+                        queues[drop].popleft()
+                        if queues[drop]:
+                            new_probe = self._is_probe(members[queues[drop][0]][0])
+                            if new_probe != probe_first[drop]:
+                                probe_first[drop] = new_probe
+                                inner_probes += 1 if new_probe else -1
+                        elif probe_first.pop(drop, False):
+                            inner_probes -= 1
+                    low += 1
+                if outer_distinct >= need and inner_distinct >= need and \
+                        inner_probes / inner_distinct > self.config.scan_unanswered_syn_fraction:
+                    by_dense = {p: members[q[0]] for p, q in queues.items() if q}
                     chosen = [by_dense[p] for p in sorted(by_dense)[:20]]
                     chosen.sort(key=lambda t: (t[0].ts, t[0].event_id))
                     rows = [r for _, r in chosen]
@@ -226,32 +271,15 @@ class PortScan:
                         {"source_ip": ip, "distinct_ports": len(by_dense)},
                         bucket=bucket_rows))
                     start = end + 1
+                    low = end + 1
+                    outer_counts.clear()
+                    inner_counts.clear()
+                    queues.clear()
+                    probe_first.clear()
+                    outer_distinct = 0
+                    inner_distinct = 0
+                    inner_probes = 0
         return out
-
-    def _dense_span(self, windowed: list) -> list | None:
-        """Earliest-ending run of windowed members holding scan_min_ports
-        distinct destination ports within less than the density window.
-        Two-pointer scan over the already time-sorted window."""
-        dense = timedelta(seconds=self.config.scan_density_window_seconds)
-        counts: Counter = Counter()
-        distinct = 0
-        low = 0
-        for high in range(len(windowed)):
-            port = windowed[high][0].destination_port
-            if port is not None:
-                if counts[port] == 0:
-                    distinct += 1
-                counts[port] += 1
-            while windowed[high][0].ts - windowed[low][0].ts >= dense:
-                old = windowed[low][0].destination_port
-                if old is not None:
-                    counts[old] -= 1
-                    if counts[old] == 0:
-                        distinct -= 1
-                low += 1
-            if distinct >= self.config.scan_min_ports:
-                return windowed[low:high + 1]
-        return None
 
     def _entropy_fallback(self, pairs):
         """Weak flow-only fallback: global per-minute destination-port Shannon
