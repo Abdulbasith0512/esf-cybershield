@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     ingest_api_key: str = ""
     max_batch_size: int = 500
     max_page_size: int = 500
+    # Threat-intel enrichment (Slice 40). Only "local-test" ships; unknown
+    # names degrade enrichment to unavailable without breaking investigation.
+    threat_intel_provider: str = "local-test"
+    threat_intel_timeout_seconds: float = 5.0
+    threat_intel_cache_ttl_seconds: int = 3600
 
 
 @lru_cache

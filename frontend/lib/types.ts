@@ -338,3 +338,45 @@ export interface RecommendationsResponse {
   incident_id: string;
   recommendations: Recommendation[];
 }
+
+export interface ThreatIntelObservable {
+  type: string;
+  value: string;
+  normalized_value: string;
+  source: string;
+  first_seen: string;
+  last_seen: string;
+  event_count: number;
+  event_ids: string[];
+}
+
+export interface ThreatIntelResult {
+  provider: string;
+  observable_type: string;
+  observable_value: string;
+  classification: string;
+  confidence: number;
+  categories: string[];
+  first_seen: string | null;
+  last_seen: string | null;
+  reference: string | null;
+  retrieved_at: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface EnrichedObservable {
+  observable: ThreatIntelObservable;
+  available: boolean;
+  intelligence: ThreatIntelResult | null;
+  error: string | null;
+  detection_ids: string[];
+  incident_id: string;
+}
+
+export interface ThreatIntelResponse {
+  incident_id: string;
+  provider: string;
+  available: boolean;
+  error: string | null;
+  observables: EnrichedObservable[];
+}

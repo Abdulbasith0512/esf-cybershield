@@ -23,9 +23,11 @@ from app.schemas.incidents import (
     NoteCreate,
     RecommendationsResponse,
 )
+from app.schemas.threatintel import ThreatIntelResponse
 from app.services.investigate import EVIDENCE_SAMPLE_LIMIT, build_investigation
 from app.services.persist import cases as case_store
 from app.services.playbooks import recommend
+from app.services.threatintel import ThreatIntelCache, enrich_incident, provider_registry
 
 logger = logging.getLogger("esf.api")
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
@@ -257,3 +259,48 @@ def get_recommendations(incident_id: str,
                                         expected_detection_ids=det_ids)
     return RecommendationsResponse(
         incident_id=incident_id, recommendations=recommend(investigation))
+
+
+_threat_intel_cache = ThreatIntelCache()
+
+
+@router.get("/{incident_id}/threat-intelligence", response_model=ThreatIntelResponse,
+            summary="Get threat-intel enrichment for one incident (advisory)")
+def get_threat_intelligence(incident_id: str,
+                            db: Session = Depends(get_db)) -> ThreatIntelResponse:
+    """Advisory enrichment only. Provider failure degrades to unavailable;
+    the incident investigation itself is never affected."""
+    incident = db.execute(
+        select(IncidentRow).where(IncidentRow.incident_id == incident_id)
+    ).scalars().first()
+    if incident is None:
+        raise HTTPException(status_code=404, detail="incident not found")
+    det_ids = list(incident.detection_ids or [])
+    det_rows = db.execute(
+        select(DetectionRow).where(DetectionRow.detection_id.in_(det_ids))
+    ).scalars().all() if det_ids else []
+    sample_ids = sorted(set(incident.evidence_event_ids or []))[:EVIDENCE_SAMPLE_LIMIT]
+    ev_rows = db.execute(
+        select(SecurityEventRow).where(SecurityEventRow.event_id.in_(sample_ids))
+    ).scalars().all() if sample_ids else []
+    settings = get_settings()
+    providers = provider_registry()
+    provider = providers.get(settings.threat_intel_provider)
+    if provider is None:
+        return ThreatIntelResponse(
+            incident_id=incident_id, provider=settings.threat_intel_provider,
+            available=False,
+            error=f"provider '{settings.threat_intel_provider}' is not configured",
+            observables=[],
+        )
+    _threat_intel_cache.ttl_seconds = max(int(settings.threat_intel_cache_ttl_seconds), 0)
+    enriched = enrich_incident(incident_id, list(ev_rows), list(det_rows), provider,
+                               cache=_threat_intel_cache)
+    failed = [e for e in enriched if not e.available]
+    return ThreatIntelResponse(
+        incident_id=incident_id, provider=provider.name,
+        available=not failed,
+        error=(f"{len(failed)} of {len(enriched)} observable(s) unavailable"
+               if failed else None),
+        observables=enriched,
+    )

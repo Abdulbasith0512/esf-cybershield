@@ -17,6 +17,7 @@ import type {
   Investigation,
   RecommendationsResponse,
   SecurityEvent,
+  ThreatIntelResponse,
 } from "@/lib/types";
 
 export class ApiError extends Error {
@@ -142,6 +143,13 @@ export function listIncidentActivity(incidentId: string, signal?: AbortSignal): 
 export function getRecommendations(incidentId: string, signal?: AbortSignal): Promise<RecommendationsResponse> {
   return request<RecommendationsResponse>(
     `/api/v1/incidents/${encodeURIComponent(incidentId)}/recommendations`,
+    { signal },
+  );
+}
+
+export function getThreatIntel(incidentId: string, signal?: AbortSignal): Promise<ThreatIntelResponse> {
+  return request<ThreatIntelResponse>(
+    `/api/v1/incidents/${encodeURIComponent(incidentId)}/threat-intelligence`,
     { signal },
   );
 }

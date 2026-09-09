@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { use, useState } from "react";
-import { ApiError, getIncident, getInvestigation, getRecommendations } from "@/lib/api-client";
+import { ApiError, getIncident, getInvestigation, getRecommendations, getThreatIntel } from "@/lib/api-client";
 import { useApi } from "@/lib/use-api";
 import { useIncidentEvidence } from "@/lib/use-incident-evidence";
 import { useIncidentDetections } from "@/lib/use-incident-detections";
@@ -19,6 +19,7 @@ import { InvestigationTimeline } from "@/components/incidents/investigation-time
 import { EvidenceSection } from "@/components/incidents/evidence-section";
 import { RiskBreakdownView } from "@/components/incidents/risk-breakdown";
 import { RecommendationsList } from "@/components/incidents/recommendations-section";
+import { ThreatIntelList } from "@/components/incidents/threat-intel-section";
 import { UebaObservations } from "@/components/incidents/ueba-observations";
 import { IncidentContext } from "@/components/incidents/incident-context";
 import { AttackStory } from "@/components/incidents/attack-story";
@@ -70,6 +71,9 @@ export function IncidentDetailView({ id }: { id: string }) {
   );
   const recommendations = useApi(`recommendations:${id}`, (signal) =>
     getRecommendations(decodeURIComponent(id), signal),
+  );
+  const threatIntel = useApi(`threat-intel:${id}`, (signal) =>
+    getThreatIntel(decodeURIComponent(id), signal),
   );
   const [focusIds, setFocusIds] = useState<string[] | null>(null);
   const bucketTotal = investigation.data
@@ -219,6 +223,16 @@ export function IncidentDetailView({ id }: { id: string }) {
 
           <Card title={`Risk breakdown`}>
             <RiskBreakdownView breakdown={data.risk_breakdown} explanation={data.risk_explanation} />
+          </Card>
+
+          <Card title="Threat intelligence">
+            {threatIntel.loading ? (
+              <LoadingState message="Loading threat intelligence..." />
+            ) : threatIntel.error || !threatIntel.data ? (
+              <ErrorState message="Unable to load threat intelligence." onRetry={threatIntel.refresh} />
+            ) : (
+              <ThreatIntelList items={threatIntel.data.observables} provider={threatIntel.data.provider} />
+            )}
           </Card>
 
           <Card title="Recommended actions">
