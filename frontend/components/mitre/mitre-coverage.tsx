@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { MetricCard } from "@/components/ui/metric-card";
 import { SeverityBadge } from "@/components/ui/badge";
 import type { MitreCoverage } from "@/lib/aggregates";
 
@@ -9,16 +10,9 @@ export function MitreCoverageView({ coverage }: { coverage: MitreCoverage }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {[
-          ["Techniques observed", String(coverage.techniques.length)],
-          ["Incidents scanned", String(coverage.incidents_scanned)],
-          ["Coverage", coverage.truncated ? "truncated" : "complete"],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-md border border-soc-border bg-soc-bg p-3">
-            <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
-            <p className="mt-1 font-mono text-sm text-white">{value}</p>
-          </div>
-        ))}
+        <MetricCard label="Techniques observed" value={String(coverage.techniques.length)} />
+        <MetricCard label="Incidents scanned" value={String(coverage.incidents_scanned)} />
+        <MetricCard label="Coverage" value={coverage.truncated ? "truncated" : "complete"} />
       </div>
       <ul className="flex flex-col gap-2">
         {coverage.techniques.map((technique) => (

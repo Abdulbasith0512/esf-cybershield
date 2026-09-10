@@ -7,8 +7,12 @@ import type { IncidentSummary } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { SeverityBadge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
+import { DataTable, TableHead, TableScroll, Td, Th, Tr } from "@/components/ui/table";
+import { TableSkeleton } from "@/components/ui/loading-skeleton";
 
 const PAGE_SIZE = 25;
 
@@ -72,10 +76,10 @@ export default function IncidentsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-xl font-bold text-white">Incidents</h1>
-        <p className="text-sm text-soc-muted">Persisted correlated investigation cases, most recent first.</p>
-      </header>
+      <PageHeader
+        title="Incidents"
+        subtitle="Persisted correlated investigation cases, most recent first."
+      />
 
       <Card title="Filters">
         <form onSubmit={applyFilters} className="flex flex-wrap items-end gap-3">
@@ -123,49 +127,56 @@ export default function IncidentsPage() {
           </Button>
         }
       >
-        {loading && <LoadingState message="Loading incidents..." />}
+        {loading && (
+          <>
+            <LoadingState message="Loading incidents..." />
+            <TableSkeleton rows={6} columns={5} />
+          </>
+        )}
         {error && !loading && <ErrorState message="Unable to load incidents." onRetry={refresh} />}
         {data && data.items.length === 0 && (
           <EmptyState message="No incidents available." hint="Run the detection pipeline and persist incidents to populate this queue." />
         )}
         {data && data.items.length > 0 && (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[880px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b border-soc-border text-xs uppercase tracking-wide text-soc-muted">
-                    <th scope="col" className="px-2 py-2 font-medium">Title</th>
-                    <th scope="col" className="px-2 py-2 font-medium">Severity</th>
-                    <th scope="col" className="px-2 py-2 font-medium">Status</th>
-                    <th scope="col" className="px-2 py-2 font-medium">Risk</th>
-                    <th scope="col" className="px-2 py-2 font-medium">Band</th>
-                    <th scope="col" className="px-2 py-2 font-medium">UEBA</th>
-                    <th scope="col" className="px-2 py-2 font-medium">Last seen</th>
-                  </tr>
-                </thead>
+            <TableScroll label="Incident queue">
+              <DataTable minWidth={880}>
+                <TableHead>
+                  <Th>Title</Th>
+                  <Th>Severity</Th>
+                  <Th>Status</Th>
+                  <Th>Risk</Th>
+                  <Th>Band</Th>
+                  <Th>UEBA</Th>
+                  <Th>Last seen</Th>
+                </TableHead>
                 <tbody>
                   {data.items.map((row) => (
-                    <tr key={row.incident_id} className="border-b border-soc-border/60 hover:bg-soc-border/30">
-                      <td className="max-w-72 truncate px-2 py-2">
-                        <Link href={`/incidents/${encodeURIComponent(row.incident_id)}`} className="text-soc-accent underline">
+                    <Tr key={row.incident_id}>
+                      <Td>
+                        <Link href={`/incidents/${encodeURIComponent(row.incident_id)}`} className="max-w-72 truncate font-sans text-sm text-soc-accent underline">
                           {row.title}
                         </Link>
-                      </td>
-                      <td className="px-2 py-2">
+                      </Td>
+                      <Td>
                         <SeverityBadge severity={row.severity} />
-                      </td>
-                      <td className="px-2 py-2 font-mono text-xs">{row.status}</td>
-                      <td className="px-2 py-2 font-mono text-xs">{row.risk_score}</td>
-                      <td className="px-2 py-2 font-mono text-xs">{row.risk_band}</td>
-                      <td className="px-2 py-2 text-xs">
-                        <UebaCell row={row} />
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-2 font-mono text-xs">{formatTime(row.last_seen)}</td>
-                    </tr>
+                      </Td>
+                      <Td>
+                        <StatusBadge status={row.status} />
+                      </Td>
+                      <Td>{row.risk_score}</Td>
+                      <Td>{row.risk_band}</Td>
+                      <Td>
+                        <span className="font-sans">
+                          <UebaCell row={row} />
+                        </span>
+                      </Td>
+                      <Td nowrap>{formatTime(row.last_seen)}</Td>
+                    </Tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
+              </DataTable>
+            </TableScroll>
             <div className="mt-3 flex items-center justify-between text-sm text-soc-muted">
               <span>
                 Page {data.page} of {data.pages} · {data.total.toLocaleString()} incidents

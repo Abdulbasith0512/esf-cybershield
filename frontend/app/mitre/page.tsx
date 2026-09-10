@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { MitreCoverageView } from "@/components/mitre/mitre-coverage";
 import { MAX_INCIDENT_DETAILS } from "@/lib/aggregates";
@@ -30,10 +31,10 @@ export default function MitrePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-xl font-bold text-white">MITRE ATT&amp;CK</h1>
-        <p className="text-sm text-soc-muted">Technique coverage mapped from detections.</p>
-      </header>
+      <PageHeader
+        title="MITRE ATT&CK"
+        subtitle="Technique coverage mapped from detections."
+      />
       <Card title="Technique coverage">
         {loading ? (
           <LoadingState message="Loading incident MITRE mappings..." />

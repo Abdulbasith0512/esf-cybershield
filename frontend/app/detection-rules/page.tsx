@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { RuleCatalogView } from "@/components/rules/rule-catalog";
 import { aggregateRules, DETECTION_PAGE_SIZE, MAX_DETECTION_PAGES } from "@/lib/aggregates";
@@ -26,10 +27,10 @@ export default function DetectionRulesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-xl font-bold text-white">Detection Rules</h1>
-        <p className="text-sm text-soc-muted">Deterministic rule catalog and firing history.</p>
-      </header>
+      <PageHeader
+        title="Detection Rules"
+        subtitle="Deterministic rule catalog and firing history."
+      />
       <Card title="Rule catalog">
         {loading ? (
           <LoadingState message="Loading persisted detections..." />

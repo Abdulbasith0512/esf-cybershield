@@ -2,63 +2,85 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 
-const NAV = [
-  { href: "/", label: "Overview" },
-  { href: "/incidents", label: "Incidents" },
-  { href: "/events", label: "Events" },
-  { href: "/detection-rules", label: "Detection Rules" },
-  { href: "/mitre", label: "MITRE ATT&CK" },
-  { href: "/ueba", label: "UEBA" },
+const GROUPS: { heading: string; items: { href: string; label: string }[] }[] = [
+  {
+    heading: "Operations",
+    items: [
+      { href: "/", label: "Overview" },
+      { href: "/incidents", label: "Incidents" },
+      { href: "/events", label: "Events" },
+    ],
+  },
+  {
+    heading: "Detection & Analytics",
+    items: [
+      { href: "/detection-rules", label: "Detection Rules" },
+      { href: "/mitre", label: "MITRE ATT&CK" },
+      { href: "/ueba", label: "UEBA" },
+    ],
+  },
 ];
 
-export function Sidebar() {
+export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
-
-  const links = (
-    <nav aria-label="Primary" className="flex flex-col gap-1">
-      {NAV.map((item) => {
-        const active = pathname === item.href;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            onClick={() => setOpen(false)}
-            className={`rounded px-3 py-2 text-sm font-medium ${
-              active ? "bg-soc-border/70 text-white" : "text-soc-muted hover:bg-soc-border/40 hover:text-soc-text"
-            }`}
-          >
-            {item.label}
-          </Link>
-        );
-      })}
+  return (
+    <nav aria-label="Primary" className="flex flex-col gap-4">
+      {GROUPS.map((group) => (
+        <div key={group.heading}>
+          <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-widest text-soc-muted">
+            {group.heading}
+          </p>
+          <ul className="flex flex-col gap-0.5">
+            {group.items.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    onClick={onNavigate}
+                    className={`relative block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      active
+                        ? "bg-soc-border/60 text-white"
+                        : "text-soc-muted hover:bg-soc-border/40 hover:text-soc-text"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full ${
+                        active ? "bg-soc-accent" : "bg-transparent"
+                      }`}
+                    />
+                    {item.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </nav>
   );
+}
 
+export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <>
-      <div className="flex items-center justify-between border-b border-soc-border bg-soc-panel px-4 py-3 lg:hidden">
-        <span className="font-mono text-sm font-bold">ESF CyberShield</span>
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-label="Toggle navigation"
-          className="rounded border border-soc-border px-3 py-1.5 text-sm"
-        >
-          Menu
-        </button>
-      </div>
-      {open && <div className="border-b border-soc-border bg-soc-panel p-3 lg:hidden">{links}</div>}
-      <aside className="hidden w-56 shrink-0 flex-col gap-4 border-r border-soc-border bg-soc-panel p-4 lg:flex">
-        <div>
-          <p className="font-mono text-sm font-bold text-white">ESF CyberShield</p>
+      {open && (
+        <div className="border-b border-soc-border bg-soc-panel p-4 lg:hidden">
+          <SidebarNav onNavigate={onClose} />
+        </div>
+      )}
+      <aside className="hidden w-60 shrink-0 flex-col gap-5 border-r border-soc-border bg-soc-panel p-4 lg:flex">
+        <div className="px-1">
+          <p className="font-mono text-sm font-bold tracking-tight text-white">ESF CyberShield</p>
           <p className="mt-0.5 text-xs text-soc-muted">SOC Analyst Console</p>
         </div>
-        {links}
-        <p className="mt-auto text-xs text-soc-muted">Frontend never connects directly to PostgreSQL.</p>
+        <SidebarNav />
+        <p className="mt-auto px-1 text-xs leading-relaxed text-soc-muted">
+          Frontend never connects directly to PostgreSQL.
+        </p>
       </aside>
     </>
   );

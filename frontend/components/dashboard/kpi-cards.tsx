@@ -5,19 +5,8 @@ import { listEvents } from "@/lib/api-client";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
+import { MetricCard } from "@/components/ui/metric-card";
 import { useApi } from "@/lib/use-api";
-
-function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-md border border-soc-border bg-soc-bg p-4">
-      <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
-      <p className="mt-1 font-mono text-2xl font-bold text-white" aria-live="polite">
-        {value}
-      </p>
-      {hint && <p className="mt-1 text-xs text-soc-muted">{hint}</p>}
-    </div>
-  );
-}
 
 export function KpiCards() {
   const { data, error, loading, refresh } = useApi("overview-kpis", (signal) =>
@@ -57,14 +46,14 @@ export function KpiCards() {
   return (
     <div aria-label="Key metrics">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Total events" value={data.total.toLocaleString()} hint="from event store" />
-        <Kpi label="Failed authentications" value={String(failed)} hint="in latest 100 events" />
-        <Kpi
+        <MetricCard label="Total events" value={data.total.toLocaleString()} hint="from event store" />
+        <MetricCard label="Failed authentications" value={String(failed)} hint="in latest 100 events" />
+        <MetricCard
           label="Top event type"
           value={byType[0]?.[0] ?? "—"}
           hint={byType[0] ? `${byType[0][1]} of latest 100` : undefined}
         />
-        <Kpi label="Sources" value={String(new Set(data.items.map((e) => e.source)).size)} hint="in latest 100 events" />
+        <MetricCard label="Sources" value={String(new Set(data.items.map((e) => e.source)).size)} hint="in latest 100 events" />
       </div>
       <Card title="Events by type (latest 100)">
         {byType.length === 0 ? (

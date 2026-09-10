@@ -12,7 +12,9 @@ import { EntitySummary } from "@/components/incidents/entity-summary";
 import { ExplanationCard } from "@/components/incidents/explanation-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { MetricCard } from "@/components/ui/metric-card";
 import { SeverityBadge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { formatTime } from "@/components/dashboard/events-table";
 import { InvestigationTimeline } from "@/components/incidents/investigation-timeline";
@@ -102,12 +104,23 @@ export function IncidentDetailView({ id }: { id: string }) {
       )}
       {data && (
         <>
-          <header className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-xl font-bold text-white">{data.title}</h1>
+          <div className="sticky top-11 z-10 -mx-1 rounded-md border border-soc-border bg-soc-panel/95 px-4 py-3 shadow-lg shadow-black/30 backdrop-blur">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="min-w-0 flex-1 basis-64 truncate text-lg font-bold tracking-tight text-white">
+                {data.title}
+              </h1>
               <SeverityBadge severity={data.severity} />
+              <StatusBadge status={data.status} />
+              <span className="font-mono text-xs text-soc-muted">
+                risk {data.risk_score} / {data.risk_band}
+              </span>
             </div>
-            <CopyableId value={data.incident_id} />
+            <div className="mt-1.5">
+              <CopyableId value={data.incident_id} />
+            </div>
+          </div>
+
+          <header className="flex flex-col gap-2">
             <p className="font-mono text-xs text-soc-muted">
               {formatTime(data.first_seen)} → {formatTime(data.last_seen)} · duration{" "}
               {formatDuration(data.first_seen, data.last_seen)} · confidence {data.confidence.toFixed(2)} ·
@@ -115,24 +128,19 @@ export function IncidentDetailView({ id }: { id: string }) {
             </p>
           </header>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
-              ["Deterministic risk", `${data.risk_score} / ${data.risk_band}`],
-              [
-                "UEBA",
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+            <MetricCard label="Deterministic risk" value={`${data.risk_score} / ${data.risk_band}`} />
+            <MetricCard
+              label="UEBA"
+              value={
                 !data.ueba_evidence?.available
                   ? "n/a"
-                  : `${data.ueba_evidence.anomaly_flag ? "Flagged" : "Clean"} (${data.ueba_evidence.anomaly_score?.toFixed(2) ?? "—"})`,
-              ],
-              ["Detections", String(data.detection_ids.length)],
-              ["Evidence events", String(data.evidence_event_ids.length)],
-              ["Bucket events", bucketTotal === null ? "—" : String(bucketTotal)],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-md border border-soc-border bg-soc-panel p-3">
-                <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
-                <p className="mt-1 font-mono text-sm text-white">{value}</p>
-              </div>
-            ))}
+                  : `${data.ueba_evidence.anomaly_flag ? "Flagged" : "Clean"} (${data.ueba_evidence.anomaly_score?.toFixed(2) ?? "—"})`
+              }
+            />
+            <MetricCard label="Detections" value={String(data.detection_ids.length)} />
+            <MetricCard label="Evidence events" value={String(data.evidence_event_ids.length)} />
+            <MetricCard label="Bucket events" value={bucketTotal === null ? "—" : String(bucketTotal)} />
           </div>
 
           <Card title="Investigation summary">

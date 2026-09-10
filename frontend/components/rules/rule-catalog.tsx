@@ -1,6 +1,7 @@
 "use client";
 
 import { SeverityBadge } from "@/components/ui/badge";
+import { MetricCard } from "@/components/ui/metric-card";
 import { formatTime } from "@/components/dashboard/events-table";
 import type { RuleCatalog } from "@/lib/aggregates";
 
@@ -9,16 +10,9 @@ export function RuleCatalogView({ catalog }: { catalog: RuleCatalog }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {[
-          ["Rules fired", String(catalog.rules.length)],
-          ["Total detections", String(catalog.total_detections)],
-          ["Coverage", catalog.truncated ? "truncated" : "complete"],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-md border border-soc-border bg-soc-bg p-3">
-            <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
-            <p className="mt-1 font-mono text-sm text-white">{value}</p>
-          </div>
-        ))}
+        <MetricCard label="Rules fired" value={String(catalog.rules.length)} />
+        <MetricCard label="Total detections" value={String(catalog.total_detections)} />
+        <MetricCard label="Coverage" value={catalog.truncated ? "truncated" : "complete"} />
       </div>
       <ul className="flex flex-col gap-2">
         {catalog.rules.map((rule) => (

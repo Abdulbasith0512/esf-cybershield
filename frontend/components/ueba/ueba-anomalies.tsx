@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { MetricCard } from "@/components/ui/metric-card";
 import { SeverityBadge } from "@/components/ui/badge";
 import type { UebaAnomalies } from "@/lib/aggregates";
 
@@ -10,16 +11,9 @@ export function UebaAnomaliesView({ anomalies }: { anomalies: UebaAnomalies }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {[
-          ["Anomalies recorded", String(anomalies.anomalies.length)],
-          ["Incidents scanned", String(anomalies.incidents_scanned)],
-          ["Coverage", anomalies.truncated ? "truncated" : "complete"],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-md border border-soc-border bg-soc-bg p-3">
-            <p className="text-xs uppercase tracking-wide text-soc-muted">{label}</p>
-            <p className="mt-1 font-mono text-sm text-white">{value}</p>
-          </div>
-        ))}
+        <MetricCard label="Anomalies recorded" value={String(anomalies.anomalies.length)} />
+        <MetricCard label="Incidents scanned" value={String(anomalies.incidents_scanned)} />
+        <MetricCard label="Coverage" value={anomalies.truncated ? "truncated" : "complete"} />
       </div>
       <ul className="flex flex-col gap-2">
         {anomalies.anomalies.map((anomaly) => (

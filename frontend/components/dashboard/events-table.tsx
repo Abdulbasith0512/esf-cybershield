@@ -6,6 +6,7 @@ import type { SecurityEvent } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
+import { DataTable, TableHead, TableScroll, Td, Th, Tr } from "@/components/ui/table";
 import { useApi } from "@/lib/use-api";
 
 export function formatCell(value: string | number | null | undefined): string {
@@ -28,43 +29,38 @@ export function EventsTable({
   selectedId?: string | null;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-        <thead>
-          <tr className="border-b border-soc-border text-xs uppercase tracking-wide text-soc-muted">
-            <th scope="col" className="px-2 py-2 font-medium">Timestamp</th>
-            <th scope="col" className="px-2 py-2 font-medium">Type</th>
-            <th scope="col" className="px-2 py-2 font-medium">Source</th>
-            <th scope="col" className="px-2 py-2 font-medium">User</th>
-            <th scope="col" className="px-2 py-2 font-medium">Host</th>
-            <th scope="col" className="px-2 py-2 font-medium">Source IP</th>
-            <th scope="col" className="px-2 py-2 font-medium">Dest IP</th>
-            <th scope="col" className="px-2 py-2 font-medium">Status</th>
-          </tr>
-        </thead>
+    <TableScroll label="Security events">
+      <DataTable minWidth={760}>
+        <TableHead>
+          <Th>Timestamp</Th>
+          <Th>Type</Th>
+          <Th>Source</Th>
+          <Th>User</Th>
+          <Th>Host</Th>
+          <Th>Source IP</Th>
+          <Th>Dest IP</Th>
+          <Th>Status</Th>
+        </TableHead>
         <tbody>
           {events.map((e) => (
-            <tr
+            <Tr
               key={e.id}
               onClick={onSelect ? () => onSelect(e) : undefined}
-              aria-selected={selectedId === e.id}
-              className={`border-b border-soc-border/60 font-mono text-xs ${
-                onSelect ? "cursor-pointer hover:bg-soc-border/30" : ""
-              } ${selectedId === e.id ? "bg-soc-border/40" : ""}`}
+              selected={selectedId === e.id}
             >
-              <td className="whitespace-nowrap px-2 py-2">{formatTime(e.timestamp)}</td>
-              <td className="px-2 py-2">{formatCell(e.event_type)}</td>
-              <td className="px-2 py-2">{formatCell(e.source)}</td>
-              <td className="px-2 py-2">{formatCell(e.user)}</td>
-              <td className="px-2 py-2">{formatCell(e.host)}</td>
-              <td className="px-2 py-2">{formatCell(e.source_ip)}</td>
-              <td className="px-2 py-2">{formatCell(e.destination_ip)}</td>
-              <td className="px-2 py-2">{formatCell(e.status)}</td>
-            </tr>
+              <Td nowrap>{formatTime(e.timestamp)}</Td>
+              <Td>{formatCell(e.event_type)}</Td>
+              <Td>{formatCell(e.source)}</Td>
+              <Td>{formatCell(e.user)}</Td>
+              <Td>{formatCell(e.host)}</Td>
+              <Td>{formatCell(e.source_ip)}</Td>
+              <Td>{formatCell(e.destination_ip)}</Td>
+              <Td>{formatCell(e.status)}</Td>
+            </Tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </DataTable>
+    </TableScroll>
   );
 }
 

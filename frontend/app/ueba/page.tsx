@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { UebaAnomaliesView } from "@/components/ueba/ueba-anomalies";
 import { MAX_INCIDENT_DETAILS } from "@/lib/aggregates";
@@ -30,10 +31,10 @@ export default function UebaPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-xl font-bold text-white">UEBA</h1>
-        <p className="text-sm text-soc-muted">Behavioral baselines and anomaly scores.</p>
-      </header>
+      <PageHeader
+        title="UEBA"
+        subtitle="Behavioral baselines and anomaly scores."
+      />
       <Card title="Behavioral anomalies">
         {loading ? (
           <LoadingState message="Loading incident UEBA evidence..." />

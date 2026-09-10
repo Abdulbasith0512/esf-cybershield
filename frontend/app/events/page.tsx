@@ -6,6 +6,7 @@ import type { SecurityEvent } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { EventsTable } from "@/components/dashboard/events-table";
 import { EventDetail } from "@/components/dashboard/event-detail";
@@ -51,10 +52,10 @@ export default function EventsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header>
-        <h1 className="text-xl font-bold text-white">Security Events</h1>
-        <p className="text-sm text-soc-muted">Server-paginated event store. Select a row for detail.</p>
-      </header>
+      <PageHeader
+        title="Security Events"
+        subtitle="Server-paginated event store. Select a row for detail."
+      />
 
       <Card title="Filters">
         <form onSubmit={applyFilters} className="flex flex-wrap items-end gap-3">
